@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from app.inning_comparison import build_inning_comparison
 from app.team_names import team_name_zh
 
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
@@ -553,6 +554,51 @@ async def analyze_team_scoring(
     }
 
 
+async def fetch_inning_comparison(
+    client: httpx.AsyncClient, team_id: int, *, game_count: int = 20
+) -> dict[str, Any]:
+    games = await fetch_recent_final_games(team_id, game_count)
+    rows: list[dict[str, Any]] = []
+
+    for game in games:
+        side = _team_side(game, team_id)
+        opp_side = "home" if side == "away" else "away"
+        linescore = await fetch_linescore(client, game["gamePk"])
+
+        my_by_inning: list[int] = []
+        opp_by_inning: list[int] = []
+        for inning in linescore.get("innings", []):
+            num = inning.get("num", 0)
+            if num < 1 or num > 9:
+                continue
+            while len(my_by_inning) < num:
+                my_by_inning.append(0)
+            while len(opp_by_inning) < num:
+                opp_by_inning.append(0)
+            my_by_inning[num - 1] = inning.get(side, {}).get("runs", 0) or 0
+            opp_by_inning[num - 1] = inning.get(opp_side, {}).get("runs", 0) or 0
+
+        scored_innings: list[int] = []
+        allowed_innings: list[int] = []
+        for index in range(9):
+            inning = index + 1
+            runs = my_by_inning[index] if index < len(my_by_inning) else 0
+            runs_allowed = opp_by_inning[index] if index < len(opp_by_inning) else 0
+            if runs > 0:
+                scored_innings.append(inning)
+            if runs_allowed > 0:
+                allowed_innings.append(inning)
+
+        rows.append(
+            {
+                "scoredInnings": scored_innings,
+                "allowedInnings": allowed_innings,
+            }
+        )
+
+    return build_inning_comparison(team_name_zh(team_id=team_id), rows)
+
+
 async def _build_side_panel(
     client: httpx.AsyncClient, side_info: dict[str, Any], game_count: int
 ) -> dict[str, Any]:
@@ -577,9 +623,11 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
-        away_panel, home_panel = await asyncio.gather(
+        away_panel, home_panel, away_table, home_table = await asyncio.gather(
             _build_side_panel(client, matchup["away"], game_count),
             _build_side_panel(client, matchup["home"], game_count),
+            fetch_inning_comparison(client, matchup["away"]["teamId"]),
+            fetch_inning_comparison(client, matchup["home"]["teamId"]),
         )
 
     return {
@@ -592,6 +640,10 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
         },
         "away": away_panel,
         "home": home_panel,
+        "aTable": {
+            "away": away_table,
+            "home": home_table,
+        },
     }
 
 

@@ -78,6 +78,26 @@ def team_name_zh(*, team_id: int | None = None, english_name: str | None = None)
     return english_name or "未知球隊"
 
 
+def match_mlb_team(text: str) -> int | None:
+    """Resolve MLB team id from Chinese nickname or English name fragment."""
+    cleaned = text.strip().replace(" ", "").replace("　", "")
+    if not cleaned:
+        return None
+
+    for team_id, zh in TEAM_ZH_BY_ID.items():
+        if cleaned == zh or cleaned in zh or zh in cleaned:
+            return team_id
+
+    lowered = cleaned.lower()
+    for english, zh in TEAM_ZH_BY_ENGLISH.items():
+        english_clean = english.replace(" ", "").lower()
+        if lowered in english_clean or english_clean in lowered:
+            for team_id, name in TEAM_ZH_BY_ID.items():
+                if name == zh:
+                    return team_id
+    return None
+
+
 def localize_analysis(data: dict) -> dict:
     team_id = data.get("teamId")
     if team_id is not None:

@@ -449,6 +449,45 @@ td {
   white-space: nowrap;
 }
 
+table.data-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+table.data-table th,
+table.data-table td {
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: middle;
+  line-height: 1.35;
+}
+
+table.data-table .col-date {
+  width: 13%;
+  padding: 10px 4px 10px 8px;
+  font-size: 0.88rem;
+}
+
+table.data-table .col-opp {
+  width: 21%;
+  padding: 10px 8px 10px 4px;
+  font-size: 0.88rem;
+}
+
+table.data-table .col-num {
+  width: 11%;
+  padding: 12px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+table.data-table .col-ou {
+  width: 9%;
+  padding: 12px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
 th {
   color: var(--muted);
   font-weight: 600;
@@ -552,6 +591,84 @@ td {
   color: var(--muted);
 }
 
+.a-table-section {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+}
+
+.a-table-summary {
+  cursor: pointer;
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--text);
+  list-style: none;
+}
+
+.a-table-summary::-webkit-details-marker {
+  display: none;
+}
+
+.a-table-summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.a-table-section[open] .a-table-summary::before {
+  content: "▾ ";
+}
+
+.a-table-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.a-table-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.a-table-block h4 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+table.data-table.a-table {
+  font-size: 0.95rem;
+}
+
+table.data-table.a-table th,
+table.data-table.a-table td {
+  padding: 6px 3px;
+}
+
+table.data-table.a-table .col-inning {
+  width: 9%;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+
+table.data-table.a-table th:not(.col-inning),
+table.data-table.a-table td:not(.col-inning) {
+  width: 18%;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+@media (max-width: 960px) {
+  .a-table-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1200px) {
   .matchup-grid {
     grid-template-columns: 1fr;
@@ -579,5 +696,27 @@ td {
 
   select {
     min-width: 100%;
+  }
+
+  table.data-table .col-date {
+    width: 11%;
+    padding: 10px 2px 10px 6px;
+    font-size: 0.82rem;
+  }
+
+  table.data-table .col-opp {
+    width: 19%;
+    padding: 10px 6px 10px 2px;
+    font-size: 0.82rem;
+  }
+
+  table.data-table .col-num {
+    width: 12%;
+    padding: 12px 4px;
+  }
+
+  table.data-table .col-ou {
+    width: 9%;
+    padding: 12px 4px;
   }
 }

@@ -12,7 +12,7 @@ from app.team_names import localize_analysis
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 9
+CACHE_VERSION = 10
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "cache.json"

@@ -3,7 +3,7 @@ const STORAGE_KEY = "mlb_last_team";
 const REFRESH_MS = 60 * 60 * 1000;
 const POLL_MS = 4000;
 const REFRESH_POLL_MS = 20000;
-const EXPECTED_CACHE_VERSION = 9;
+const EXPECTED_CACHE_VERSION = 10;
 
 const FETCH_TIMEOUT_MS = 45000;
 const MAX_POLL_ATTEMPTS = 45;
@@ -27,8 +27,8 @@ let hasDisplayedData = false;
 let lastContentFingerprint = "";
 
 function buildContentFingerprint(data) {
-  const { matchup, away, home, cachedAt } = data;
-  return JSON.stringify({ cachedAt, matchup, away, home });
+  const { matchup, away, home, aTable, cachedAt } = data;
+  return JSON.stringify({ cachedAt, matchup, away, home, aTable });
 }
 
 function captureTableScroll() {
@@ -269,15 +269,15 @@ function teamGamesTable(games) {
   if (!games.length) return `<p class="empty-note">尚無數據</p>`;
   return `
     <div class="table-wrap">
-      <table>
+      <table class="data-table">
         <thead>
           <tr>
-            <th>日期</th>
-            <th>對手</th>
-            <th>1局得分</th>
-            <th>1–5 得分</th>
-            <th>1.5</th>
-            <th>2.5</th>
+            <th class="col-date">日期</th>
+            <th class="col-opp">對手</th>
+            <th class="col-num">1局得分</th>
+            <th class="col-num">1–5 得分</th>
+            <th class="col-ou">1.5</th>
+            <th class="col-ou">2.5</th>
           </tr>
         </thead>
         <tbody>
@@ -285,12 +285,12 @@ function teamGamesTable(games) {
             .map(
               (game) => `
             <tr>
-              <td>${game.date}</td>
-              <td>${formatOpponent(game)}</td>
-              <td>${teamFirstInningBadge(game.firstInningScored)}</td>
-              <td class="runs">${game.firstFiveRuns}</td>
-              <td>${ouBadge(game.over15)}</td>
-              <td>${ouBadge(game.over25)}</td>
+              <td class="col-date">${game.date.slice(5)}</td>
+              <td class="col-opp">${formatOpponent(game)}</td>
+              <td class="col-num">${teamFirstInningBadge(game.firstInningScored)}</td>
+              <td class="col-num runs">${game.firstFiveRuns}</td>
+              <td class="col-ou">${ouBadge(game.over15)}</td>
+              <td class="col-ou">${ouBadge(game.over25)}</td>
             </tr>
           `
             )
@@ -305,16 +305,16 @@ function pitcherGamesTable(games) {
   if (!games.length) return `<p class="empty-note">尚無先發數據</p>`;
   return `
     <div class="table-wrap">
-      <table>
+      <table class="data-table">
         <thead>
           <tr>
-            <th>日期</th>
-            <th>對手</th>
-            <th>掉分局數</th>
-            <th>1局失分</th>
-            <th>1–5 失分</th>
-            <th>1.5</th>
-            <th>2.5</th>
+            <th class="col-date">日期</th>
+            <th class="col-opp">對手</th>
+            <th class="col-num">掉分局數</th>
+            <th class="col-num">1局失分</th>
+            <th class="col-num">1–5 失分</th>
+            <th class="col-ou">1.5</th>
+            <th class="col-ou">2.5</th>
           </tr>
         </thead>
         <tbody>
@@ -322,13 +322,13 @@ function pitcherGamesTable(games) {
             .map(
               (game) => `
             <tr>
-              <td>${game.date}</td>
-              <td>${formatOpponent(game)}</td>
-              <td>${formatScoredInnings(game)}</td>
-              <td>${inningScoredBadge(game.firstInningScored)} <span class="runs">${game.firstInningRunsAllowed}</span></td>
-              <td class="runs">${game.firstFiveRunsAllowed}</td>
-              <td>${ouBadge(game.over15)}</td>
-              <td>${ouBadge(game.over25)}</td>
+              <td class="col-date">${game.date.slice(5)}</td>
+              <td class="col-opp">${formatOpponent(game)}</td>
+              <td class="col-num">${formatScoredInnings(game)}</td>
+              <td class="col-num">${inningScoredBadge(game.firstInningScored)} <span class="runs">${game.firstInningRunsAllowed}</span></td>
+              <td class="col-num runs">${game.firstFiveRunsAllowed}</td>
+              <td class="col-ou">${ouBadge(game.over15)}</td>
+              <td class="col-ou">${ouBadge(game.over25)}</td>
             </tr>
           `
             )
@@ -407,6 +407,11 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
     ${renderSideColumn(home, "主隊")}
   `;
 
+  const aTableRoot = document.getElementById("a-table-root");
+  if (aTableRoot) {
+    aTableRoot.innerHTML = renderATableSection(data.aTable);
+  }
+
   restoreTableScroll(tableScroll);
   return true;
 }
@@ -470,6 +475,9 @@ function schedulePoll(slow = false) {
 function needsFreshData(data, games) {
   const hasUsableData = isDataReady(data);
   if ((!data.cacheVersion || data.cacheVersion < expectedCacheVersion) && !hasUsableData) {
+    return true;
+  }
+  if (hasUsableData && !data.aTable?.away?.recent20) {
     return true;
   }
   const today = new Date().toISOString().slice(0, 10);

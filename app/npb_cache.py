@@ -13,7 +13,7 @@ from app.npb_display import localize_matchup_payload
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 12
+CACHE_VERSION = 14
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "npb_cache.json"

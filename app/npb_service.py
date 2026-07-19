@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
+from app.inning_comparison import build_inning_comparison
 from app.npb_teams import TEAM_BY_ID, list_teams, match_team, team_zh
 
 NPB_BASE = "https://npb.jp"
@@ -335,13 +336,17 @@ def _defensive_half_label(is_home: bool) -> str:
 
 
 def _parse_pitcher_runs_from_playbyplay(
-    html: str, is_home: bool, pitcher_name: str
+    html: str,
+    is_home: bool,
+    pitcher_name: str,
+    opp_innings: list[int] | None = None,
 ) -> list[int]:
     """Runs allowed by pitcher in each inning (index 0 = inning 1) from npb.jp play-by-play."""
     soup = BeautifulSoup(html, "html.parser")
     defend_half = _defensive_half_label(is_home)
     runs = [0] * 9
     current_pitcher: str | None = None
+    opp = opponent_runs_by_inning(opp_innings or [])
 
     for heading in soup.find_all("h5"):
         title = heading.get_text(strip=True)
@@ -353,6 +358,7 @@ def _parse_pitcher_runs_from_playbyplay(
         if half != defend_half or inning < 1 or inning > 9:
             continue
 
+        half_had_change = False
         for element in heading.find_all_next(["tr", "h5"]):
             if element.name == "h5":
                 break
@@ -367,6 +373,7 @@ def _parse_pitcher_runs_from_playbyplay(
 
             change = PBP_CHANGE_RE.search(row)
             if change:
+                half_had_change = True
                 outgoing = change.group(1).strip()
                 incoming = change.group(2).strip()
                 if current_pitcher and _pitcher_name_matches(pitcher_name, outgoing):
@@ -376,6 +383,15 @@ def _parse_pitcher_runs_from_playbyplay(
 
             if current_pitcher and _pitcher_name_matches(pitcher_name, current_pitcher):
                 runs[inning - 1] += sum(int(value) for value in PBP_RBI_RE.findall(row))
+
+        # npb.jp omits 打点 on some scoring plays (e.g. GIDP run). When the pitcher
+        # worked the entire defensive half with no mid-inning change, use linescore.
+        if (
+            not half_had_change
+            and current_pitcher
+            and _pitcher_name_matches(pitcher_name, current_pitcher)
+        ):
+            runs[inning - 1] = opp[inning - 1]
 
     return runs
 
@@ -595,8 +611,11 @@ async def analyze_pitcher_starts(
         if not starter or not _pitcher_name_matches(pitcher_name, starter):
             return None
         pbp_html = await client.fetch_playbyplay(meta["href"])
+        opp_innings = parsed["awayInnings" if is_home else "homeInnings"]
         pbp_runs = (
-            _parse_pitcher_runs_from_playbyplay(pbp_html, is_home, pitcher_name)
+            _parse_pitcher_runs_from_playbyplay(
+                pbp_html, is_home, pitcher_name, opp_innings
+            )
             if pbp_html
             else None
         )
@@ -628,6 +647,54 @@ async def analyze_pitcher_starts(
     }
 
 
+async def fetch_inning_comparison(
+    client: NpbClient, team_id: int, *, game_count: int = 20
+) -> dict[str, Any]:
+    team = TEAM_BY_ID[team_id]
+    schedule = await client.fetch_schedule()
+    finished = [
+        game
+        for game in schedule
+        if game["status"] == "Final"
+        and team_id in {game["awayTeamId"], game["homeTeamId"]}
+        and game.get("href")
+    ]
+    finished.sort(key=lambda game: game.get("date", ""), reverse=True)
+    finished = finished[:game_count]
+
+    rows: list[dict[str, Any]] = []
+    for meta in finished:
+        parsed = await client.fetch_game(meta["href"])
+        if not parsed:
+            continue
+
+        is_home = parsed["homeTeamId"] == team_id
+        side = "home" if is_home else "away"
+        opp_side = "away" if is_home else "home"
+        my_innings = parsed[f"{side}Innings"]
+        opp_innings = parsed[f"{opp_side}Innings"]
+
+        scored_innings: list[int] = []
+        allowed_innings: list[int] = []
+        for index in range(9):
+            runs = my_innings[index] if index < len(my_innings) else 0
+            runs_allowed = opp_innings[index] if index < len(opp_innings) else 0
+            inning = index + 1
+            if runs > 0:
+                scored_innings.append(inning)
+            if runs_allowed > 0:
+                allowed_innings.append(inning)
+
+        rows.append(
+            {
+                "scoredInnings": scored_innings,
+                "allowedInnings": allowed_innings,
+            }
+        )
+
+    return build_inning_comparison(team["nameZh"], rows)
+
+
 async def _build_side_panel(
     client: NpbClient, side_info: dict[str, Any], game_count: int
 ) -> dict[str, Any]:
@@ -653,9 +720,11 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
-        away_panel, home_panel = await asyncio.gather(
+        away_panel, home_panel, away_table, home_table = await asyncio.gather(
             _build_side_panel(client, matchup["away"], game_count),
             _build_side_panel(client, matchup["home"], game_count),
+            fetch_inning_comparison(client, matchup["away"]["teamId"]),
+            fetch_inning_comparison(client, matchup["home"]["teamId"]),
         )
     finally:
         await client.close()
@@ -670,4 +739,8 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
         },
         "away": away_panel,
         "home": home_panel,
+        "aTable": {
+            "away": away_table,
+            "home": home_table,
+        },
     }
