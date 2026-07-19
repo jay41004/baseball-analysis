@@ -3,9 +3,18 @@ function aTableCell(count, total) {
   return `${count}(${Math.round((count / total) * 100)}%)`;
 }
 
+function aTableReady(data) {
+  return (
+    data?.away?.recent10 &&
+    data?.away?.recent20 &&
+    data?.home?.recent10 &&
+    data?.home?.recent20
+  );
+}
+
 function renderATableBlock(side, roleLabel) {
   if (!side?.recent10 || !side?.recent20) {
-    return `<p class="empty-note">尚無 a表格 數據</p>`;
+    return `<p class="empty-note">a表格 載入中…</p>`;
   }
 
   const rows = [1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -47,15 +56,20 @@ function renderATableBlock(side, roleLabel) {
   `;
 }
 
-function renderATableSection(aTable) {
+function renderATableSection(aTable, { loading = false, slow = false } = {}) {
+  const loadingText = slow
+    ? "a表格 仍在背景載入，請稍候或按「立即更新」"
+    : "a表格 載入中…";
   const awayBlock =
     aTable?.away?.recent10 && aTable?.away?.recent20
       ? renderATableBlock(aTable.away, "客隊")
-      : `<p class="empty-note">a表格 資料載入中… 若久未出現請按「立即更新」</p>`;
+      : `<p class="empty-note">${loading ? loadingText : "尚無 a表格 數據"}</p>`;
   const homeBlock =
     aTable?.home?.recent10 && aTable?.home?.recent20
       ? renderATableBlock(aTable.home, "主隊")
-      : "";
+      : loading
+        ? `<p class="empty-note">${loadingText}</p>`
+        : "";
 
   return `
     <details class="a-table-section card" open>
@@ -67,4 +81,60 @@ function renderATableSection(aTable) {
       </div>
     </details>
   `;
+}
+
+let aTableLoadToken = 0;
+const MAX_ATABLE_ATTEMPTS = 40;
+const ATABLE_POLL_MS = 3000;
+
+async function loadATable(apiBase, teamId, { fetchWithTimeout } = {}) {
+  const root = document.getElementById("a-table-root");
+  if (!root || !teamId) return;
+
+  if (aTableReady(window.__lastATable)) {
+    root.innerHTML = renderATableSection(window.__lastATable);
+    return;
+  }
+
+  const token = ++aTableLoadToken;
+  root.innerHTML = renderATableSection(null, { loading: true });
+
+  const fetchFn =
+    fetchWithTimeout ||
+    ((url) => fetch(url, { signal: AbortSignal.timeout ? AbortSignal.timeout(45000) : undefined }));
+
+  for (let attempt = 0; attempt < MAX_ATABLE_ATTEMPTS; attempt += 1) {
+    try {
+      const resp = await fetchFn(`${apiBase}/a-table?team_id=${teamId}`);
+      const data = await resp.json();
+      if (token !== aTableLoadToken) return;
+      if (aTableReady(data)) {
+        window.__lastATable = data;
+        root.innerHTML = renderATableSection(data);
+        return;
+      }
+      if (!data.loading && !data.refreshing && attempt > 2) {
+        root.innerHTML = renderATableSection(null);
+        return;
+      }
+    } catch (_) {
+      if (token !== aTableLoadToken) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, ATABLE_POLL_MS));
+  }
+
+  if (token === aTableLoadToken) {
+    root.innerHTML = renderATableSection(null, { loading: true, slow: true });
+  }
+}
+
+function showATableFromMatchup(aTable) {
+  const root = document.getElementById("a-table-root");
+  if (!root) return;
+  if (aTableReady(aTable)) {
+    window.__lastATable = aTable;
+    root.innerHTML = renderATableSection(aTable);
+    return;
+  }
+  root.innerHTML = renderATableSection(null, { loading: true });
 }

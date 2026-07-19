@@ -1,12 +1,12 @@
 const PHILADELPHIA_ID = 143;
 const STORAGE_KEY = "mlb_last_team";
 const REFRESH_MS = 60 * 60 * 1000;
-const POLL_MS = 4000;
-const REFRESH_POLL_MS = 20000;
+const POLL_MS = 3000;
+const REFRESH_POLL_MS = 8000;
 const EXPECTED_CACHE_VERSION = 10;
 
 const FETCH_TIMEOUT_MS = 45000;
-const MAX_POLL_ATTEMPTS = 45;
+const MAX_POLL_ATTEMPTS = 15;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
 let pollTimer = null;
@@ -25,10 +25,11 @@ const matchupGridEl = document.getElementById("matchup-grid");
 
 let hasDisplayedData = false;
 let lastContentFingerprint = "";
+let fetchToken = 0;
 
 function buildContentFingerprint(data) {
-  const { matchup, away, home, aTable, cachedAt } = data;
-  return JSON.stringify({ cachedAt, matchup, away, home, aTable });
+  const { matchup, away, home, cachedAt } = data;
+  return JSON.stringify({ cachedAt, matchup, away, home });
 }
 
 function captureTableScroll() {
@@ -409,7 +410,7 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 
   const aTableRoot = document.getElementById("a-table-root");
   if (aTableRoot) {
-    aTableRoot.innerHTML = renderATableSection(data.aTable);
+    showATableFromMatchup(data.aTable);
   }
 
   restoreTableScroll(tableScroll);
@@ -473,11 +474,10 @@ function schedulePoll(slow = false) {
 }
 
 function needsFreshData(data, games) {
-  const hasUsableData = isDataReady(data);
-  if ((!data.cacheVersion || data.cacheVersion < expectedCacheVersion) && !hasUsableData) {
-    return true;
+  if (isDataReady(data)) {
+    return false;
   }
-  if (hasUsableData && !data.aTable?.away?.recent20) {
+  if (!data.cacheVersion || data.cacheVersion < expectedCacheVersion) {
     return true;
   }
   const today = new Date().toISOString().slice(0, 10);
@@ -487,18 +487,6 @@ function needsFreshData(data, games) {
       if (game.result == null && game.firstFiveRuns === 0 && game.opponentStarter == null) {
         return true;
       }
-    }
-    const pitcher = data[side]?.pitcherAnalysis;
-    if (!pitcher?.pitcherName || !pitcher.games?.length) {
-      continue;
-    }
-    const target = Math.min(games, 10);
-    if (pitcher.games.length < target) {
-      return true;
-    }
-    const summaryTotal = pitcher.summary?.totalGames ?? 0;
-    if (summaryTotal > 0 && summaryTotal !== pitcher.games.length) {
-      return true;
     }
   }
   return false;
@@ -525,11 +513,17 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
   localStorage.setItem(STORAGE_KEY, teamId);
   showError("");
   fetchInFlight = true;
+  const token = ++fetchToken;
 
   let ready = false;
   if (!isPoll) {
     pollAttempts = 0;
-    setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
+    clearPollTimer();
+    if (!hasDisplayedData) {
+      setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
+    } else {
+      cacheStatusEl.textContent = "切換球隊中…";
+    }
     resultsEl.classList.remove("hidden");
   }
 
@@ -539,6 +533,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
 
     const resp = await fetchWithTimeout(`/api/matchup?${query}`);
     const data = await resp.json();
+    if (token !== fetchToken) return;
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
     if (!force && allowAutoRetry && needsFreshData(data, games)) {
@@ -550,6 +545,9 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
 
     renderMatchup(data, { skipIfUnchanged: isPoll });
     hasDisplayedData = true;
+    if (!aTableReady(data.aTable)) {
+      loadATable("/api/mlb", teamId, { fetchWithTimeout });
+    }
     ready = isDataReady(data);
 
     if (!ready) {
@@ -560,14 +558,20 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
         clearPollTimer();
         return;
       }
-      cacheStatusEl.textContent = `資料準備中，自動更新中…（${pollAttempts}/${MAX_POLL_ATTEMPTS}）`;
+      const waitMsg = hasDisplayedData
+        ? `正在載入此隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}）`
+        : `正在抓取本隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}，約 1～2 分鐘）`;
+      cacheStatusEl.textContent = waitMsg;
       schedulePoll(false);
       return;
     }
 
     pollAttempts = 0;
     clearPollTimer();
-    if (data.refreshing) schedulePoll(true);
+    if (data.refreshing) {
+      cacheStatusEl.textContent = "已顯示快取資料，背景更新中…";
+      schedulePoll(true);
+    }
   } catch (err) {
     clearPollTimer();
     ready = true;
@@ -579,8 +583,10 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       showError(err.message || "發生未知錯誤");
     }
   } finally {
-    fetchInFlight = false;
-    setBusy(false);
+    if (token === fetchToken) {
+      fetchInFlight = false;
+      setBusy(false);
+    }
   }
 }
 

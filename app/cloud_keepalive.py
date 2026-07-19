@@ -10,7 +10,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-KEEPALIVE_SECONDS = int(os.environ.get("KEEPALIVE_SECONDS", "600"))
+KEEPALIVE_SECONDS = int(os.environ.get("KEEPALIVE_SECONDS", "480"))
 
 
 async def cloud_keepalive_loop() -> None:
@@ -22,8 +22,8 @@ async def cloud_keepalive_loop() -> None:
         logger.warning("RENDER is set but RENDER_EXTERNAL_URL is missing; skip keepalive")
         return
 
-    await asyncio.sleep(30)
-    logger.info("Cloud keepalive started for %s", base_url)
+    await asyncio.sleep(10)
+    logger.info("Cloud keepalive started for %s (every %ss)", base_url, KEEPALIVE_SECONDS)
 
     while True:
         try:

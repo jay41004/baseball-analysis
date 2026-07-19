@@ -6,8 +6,17 @@ import asyncio
 import logging
 import os
 
-from app.npb_cache import CACHE_VERSION, DEFAULT_GAMES, cached_team_count, load_from_disk, store_matchup
-from app.npb_service import analyze_matchup, fetch_npb_teams
+from app.npb_cache import (
+    CACHE_VERSION,
+    DEFAULT_GAMES,
+    cached_team_count,
+    get_matchup,
+    is_stale,
+    load_from_disk,
+    store_matchup,
+    store_a_table,
+)
+from app.npb_service import analyze_matchup, analyze_matchup_a_table, fetch_npb_teams
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +32,27 @@ def is_refreshing(team_id: int, games: int = DEFAULT_GAMES) -> bool:
     return key in _refreshing_keys
 
 
+_refreshing_a_table: set[int] = set()
+
+
+def is_refreshing_a_table(team_id: int) -> bool:
+    return team_id in _refreshing_a_table
+
+
+async def refresh_a_table(team_id: int) -> None:
+    if team_id in _refreshing_a_table:
+        return
+    _refreshing_a_table.add(team_id)
+    try:
+        data = await analyze_matchup_a_table(team_id)
+        await store_a_table(team_id, data)
+        logger.info("Refreshed NPB a-table cache for team %s", team_id)
+    except Exception:
+        logger.exception("Failed to refresh NPB a-table for team %s", team_id)
+    finally:
+        _refreshing_a_table.discard(team_id)
+
+
 async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
     key = f"npb:matchup:v{CACHE_VERSION}:{team_id}:{games}"
     if key in _refreshing_keys:
@@ -32,11 +62,21 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
     try:
         data = await analyze_matchup(team_id, games)
         await store_matchup(team_id, games, data)
+        asyncio.create_task(refresh_a_table(team_id))
         logger.info("Refreshed NPB matchup cache for team %s (%s games)", team_id, games)
     except Exception:
         logger.exception("Failed to refresh NPB matchup for team %s", team_id)
     finally:
         _refreshing_keys.discard(key)
+
+
+def _teams_needing_refresh(teams: list[dict], games: int) -> list[dict]:
+    stale: list[dict] = []
+    for team in teams:
+        entry = get_matchup(team["id"], games)
+        if entry is None or is_stale(entry["updatedAt"]):
+            stale.append(team)
+    return stale
 
 
 async def refresh_all_matchups(games: int = DEFAULT_GAMES) -> None:
@@ -45,19 +85,33 @@ async def refresh_all_matchups(games: int = DEFAULT_GAMES) -> None:
         _warming_all = True
         try:
             teams = await fetch_npb_teams()
+            targets = _teams_needing_refresh(teams, games)
+            if not targets:
+                logger.info("NPB cache already warm for all %s teams", len(teams))
+                return
+
             semaphore = asyncio.Semaphore(WARMUP_CONCURRENCY)
 
             async def refresh_one(team: dict) -> None:
                 async with semaphore:
                     await refresh_matchup(team["id"], games)
 
-            await asyncio.gather(*[refresh_one(team) for team in teams])
-            logger.info("Finished warming NPB cache for %s teams", len(teams))
+            await asyncio.gather(*[refresh_one(team) for team in targets])
+            logger.info(
+                "Finished warming NPB cache (%s/%s teams refreshed)",
+                len(targets),
+                len(teams),
+            )
         finally:
             _warming_all = False
 
 
 async def hourly_refresh_loop() -> None:
+    is_cloud = bool(os.environ.get("RENDER"))
+    startup_delay = int(os.environ.get("WARMUP_START_DELAY", "0" if is_cloud else "120"))
+    if startup_delay > 0:
+        await asyncio.sleep(startup_delay)
+
     while True:
         await refresh_all_matchups(DEFAULT_GAMES)
         await asyncio.sleep(REFRESH_SECONDS)
@@ -74,4 +128,3 @@ async def start_npb_cache_services() -> None:
         cached_team_count(DEFAULT_GAMES),
     )
     asyncio.create_task(hourly_refresh_loop())
-    asyncio.create_task(refresh_all_matchups(DEFAULT_GAMES))

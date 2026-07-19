@@ -30,8 +30,50 @@ def _matchup_key(team_id: int, games: int) -> str:
     return f"npb:matchup:v{CACHE_VERSION}:{team_id}:{games}"
 
 
+def _a_table_key(team_id: int) -> str:
+    return f"npb:atable:v{CACHE_VERSION}:{team_id}"
+
+
 def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
-    return _store.get(_matchup_key(team_id, games))
+    hit = _store.get(_matchup_key(team_id, games))
+    if hit:
+        return hit
+    suffix = f":{team_id}:{games}"
+    for key, value in _store.items():
+        if key.startswith("npb:matchup:v") and key.endswith(suffix):
+            return value
+    return None
+
+
+def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
+    return False
+
+
+def get_a_table(team_id: int) -> dict[str, Any] | None:
+    return _store.get(_a_table_key(team_id))
+
+
+async def store_a_table(team_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    entry = {"data": data, "updatedAt": _now_iso()}
+    async with _lock:
+        _store[_a_table_key(team_id)] = entry
+        save_to_disk()
+    return entry
+
+
+def wrap_a_table_response(
+    entry: dict[str, Any], *, refreshing: bool = False, from_cache: bool = True
+) -> dict[str, Any]:
+    updated_at = entry["updatedAt"]
+    next_refresh = _parse_time(updated_at) + CACHE_TTL
+    return {
+        **copy.deepcopy(entry["data"]),
+        "cacheVersion": CACHE_VERSION,
+        "cachedAt": updated_at,
+        "nextRefreshAt": next_refresh.isoformat(timespec="seconds"),
+        "fromCache": from_cache,
+        "refreshing": refreshing,
+    }
 
 
 def cached_team_count(games: int = DEFAULT_GAMES) -> int:
