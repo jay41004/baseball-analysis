@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>日本職棒 前五局對戰分析</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <p class="eyebrow">NPB Predictive Analytics</p>
+        <h1>日本職棒 · 下一場對戰分析</h1>
+        <p class="subtitle">資料來源 NPB 官網 · 左：客隊 · 右：主隊 · <a href="https://baseball-analysis.onrender.com/npb" target="_blank" rel="noopener">雲端網址</a></p>
+      </div>
+      <nav class="site-nav">
+        <a href="/">MLB 美國職棒</a>
+        <a class="active" href="/npb">NPB 日本職棒</a>
+      </nav>
+    </header>
+
+    <section class="controls card">
+      <label for="team-select">選擇球隊（12 球團）</label>
+      <div class="control-row">
+        <select id="team-select">
+          <option value="">載入中...</option>
+        </select>
+        <label class="inline-label" for="game-count">場數</label>
+        <input id="game-count" type="number" min="1" max="30" value="10" />
+        <button id="refresh-btn" type="button">立即更新</button>
+      </div>
+      <p id="cache-status" class="cache-status">資料每小時自動更新</p>
+    </section>
+
+    <div id="loading" class="loading hidden">正在抓取 NPB 數據...</div>
+    <div id="error" class="error hidden"></div>
+
+    <section id="results" class="hidden">
+      <article class="card matchup-header">
+        <p class="stat-label">下一場對戰</p>
+        <h2 id="matchup-title" class="matchup-title">-</h2>
+        <p id="matchup-meta" class="matchup-meta"></p>
+      </article>
+
+      <div id="matchup-grid" class="matchup-grid"></div>
+    </section>
+  </div>
+
+  <script src="/static/npb.js?v=20"></script>
+</body>
+</html>
