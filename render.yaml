@@ -1,12 +1,27 @@
-# Render Blueprint: https://render.com/docs/blueprint-spec
-services:
-  - type: web
-    name: baseball-inning-analysis
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.12.8"
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: baseball-inning-analysis
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: REFRESH_SECONDS
+        value: "3600"
+      - key: KEEPALIVE_SECONDS
+        value: "600"
+      - key: NPB_WARMUP_CONCURRENCY
+        value: "2"
+      - key: MLB_WARMUP_CONCURRENCY
+        value: "4"
+
+  - type: cron
+    name: baseball-analysis-keepalive
+    runtime: python
+    schedule: "*/10 * * * *"
+    buildCommand: pip install httpx
+    startCommand: python -c "import httpx; r=httpx.get('https://baseball-analysis.onrender.com/api/warmup', timeout=120); print(r.status_code)"

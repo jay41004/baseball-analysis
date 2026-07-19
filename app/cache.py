@@ -12,7 +12,7 @@ from app.team_names import localize_analysis
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 8
+CACHE_VERSION = 9
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "cache.json"
@@ -31,6 +31,12 @@ def _matchup_key(team_id: int, games: int) -> str:
 
 def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
     return _store.get(_matchup_key(team_id, games))
+
+
+def cached_team_count(games: int = DEFAULT_GAMES) -> int:
+    prefix = f"matchup:v{CACHE_VERSION}:"
+    suffix = f":{games}"
+    return sum(1 for key in _store if key.startswith(prefix) and key.endswith(suffix))
 
 
 async def store_matchup(team_id: int, games: int, data: dict[str, Any]) -> dict[str, Any]:

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import contextlib
 from pathlib import Path
 
 import asyncio
@@ -11,24 +12,31 @@ from fastapi.templating import Jinja2Templates
 from app.cache import (
     CACHE_VERSION as MLB_CACHE_VERSION,
     DEFAULT_GAMES,
+    cached_team_count as mlb_cached_team_count,
     get_matchup,
     is_stale,
-    store_matchup,
     wrap_matchup_response,
 )
-from app.mlb_service import analyze_matchup, fetch_teams
+from app.mlb_service import fetch_teams
 from app.npb_cache import (
     CACHE_VERSION as NPB_CACHE_VERSION,
+    cached_team_count as npb_cached_team_count,
     get_matchup as get_npb_matchup,
     is_stale as npb_is_stale,
-    store_matchup as store_npb_matchup,
     wrap_matchup_response as wrap_npb_matchup_response,
 )
-from app.npb_service import analyze_matchup as analyze_npb_matchup
 from app.npb_service import fetch_npb_teams
+from app.loading_response import loading_matchup_payload
 from app.npb_scheduler import refresh_matchup as refresh_npb_matchup
+from app.npb_scheduler import is_refreshing as npb_is_refreshing
+from app.npb_scheduler import is_warming_all as npb_is_warming_all
+from app.npb_scheduler import refresh_all_matchups as refresh_all_npb_matchups
 from app.npb_scheduler import start_npb_cache_services
-from app.scheduler import refresh_matchup, start_cache_services
+from app.cloud_keepalive import cloud_keepalive_loop
+from app.scheduler import refresh_matchup, is_refreshing as mlb_is_refreshing
+from app.scheduler import is_warming_all as mlb_is_warming_all
+from app.scheduler import refresh_all_matchups as refresh_all_mlb_matchups
+from app.scheduler import start_cache_services
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -37,7 +45,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 async def lifespan(app: FastAPI):
     await start_cache_services()
     await start_npb_cache_services()
-    yield
+    keepalive_task = asyncio.create_task(cloud_keepalive_loop())
+    try:
+        yield
+    finally:
+        keepalive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await keepalive_task
 
 
 app = FastAPI(title="棒球前五局分析", lifespan=lifespan)
@@ -55,6 +69,24 @@ async def api_meta():
     return {
         "mlbCacheVersion": MLB_CACHE_VERSION,
         "npbCacheVersion": NPB_CACHE_VERSION,
+        "mlbTeamsCached": mlb_cached_team_count(DEFAULT_GAMES),
+        "npbTeamsCached": npb_cached_team_count(DEFAULT_GAMES),
+        "warming": mlb_is_warming_all() or npb_is_warming_all(),
+    }
+
+
+@app.get("/api/warmup")
+async def api_warmup():
+    """Keep server awake and refresh all team caches in the background."""
+    if not mlb_is_warming_all():
+        asyncio.create_task(refresh_all_mlb_matchups(DEFAULT_GAMES))
+    if not npb_is_warming_all():
+        asyncio.create_task(refresh_all_npb_matchups(DEFAULT_GAMES))
+    return {
+        "status": "warming",
+        "mlbTeamsCached": mlb_cached_team_count(DEFAULT_GAMES),
+        "npbTeamsCached": npb_cached_team_count(DEFAULT_GAMES),
+        "warming": True,
     }
 
 
@@ -87,20 +119,22 @@ async def api_matchup(
     try:
         cached = get_matchup(team_id, games)
 
-        if cached and not force:
-            if is_stale(cached["updatedAt"]):
+        if force:
+            if not mlb_is_refreshing(team_id, games):
+                asyncio.create_task(refresh_matchup(team_id, games))
+            if cached:
+                return wrap_matchup_response(cached, refreshing=True)
+            return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
+
+        if cached:
+            if is_stale(cached["updatedAt"]) and not mlb_is_refreshing(team_id, games):
                 asyncio.create_task(refresh_matchup(team_id, games))
                 return wrap_matchup_response(cached, refreshing=True)
             return wrap_matchup_response(cached)
 
-        if cached and force:
-            data = await analyze_matchup(team_id, games)
-            entry = await store_matchup(team_id, games, data)
-            return wrap_matchup_response(entry, from_cache=False)
-
-        data = await analyze_matchup(team_id, games)
-        entry = await store_matchup(team_id, games, data)
-        return wrap_matchup_response(entry, from_cache=False)
+        if not mlb_is_refreshing(team_id, games):
+            asyncio.create_task(refresh_matchup(team_id, games))
+        return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -116,20 +150,26 @@ async def api_npb_matchup(
     try:
         cached = get_npb_matchup(team_id, games)
 
-        if cached and not force:
-            if npb_is_stale(cached["updatedAt"]):
+        if force:
+            if not npb_is_refreshing(team_id, games):
                 asyncio.create_task(refresh_npb_matchup(team_id, games))
-                return wrap_npb_matchup_response(cached, refreshing=True)
-            return wrap_npb_matchup_response(cached)
+            if cached:
+                return await asyncio.to_thread(
+                    wrap_npb_matchup_response, cached, refreshing=True
+                )
+            return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
 
-        if cached and force:
-            data = await analyze_npb_matchup(team_id, games)
-            entry = await store_npb_matchup(team_id, games, data)
-            return wrap_npb_matchup_response(entry, from_cache=False)
+        if cached:
+            if npb_is_stale(cached["updatedAt"]) and not npb_is_refreshing(team_id, games):
+                asyncio.create_task(refresh_npb_matchup(team_id, games))
+                return await asyncio.to_thread(
+                    wrap_npb_matchup_response, cached, refreshing=True
+                )
+            return await asyncio.to_thread(wrap_npb_matchup_response, cached)
 
-        data = await analyze_npb_matchup(team_id, games)
-        entry = await store_npb_matchup(team_id, games, data)
-        return wrap_npb_matchup_response(entry, from_cache=False)
+        if not npb_is_refreshing(team_id, games):
+            asyncio.create_task(refresh_npb_matchup(team_id, games))
+        return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

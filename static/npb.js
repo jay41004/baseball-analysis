@@ -1,9 +1,18 @@
 const DEFAULT_TEAM_ID = 1;
 const STORAGE_KEY = "npb_last_team";
 const REFRESH_MS = 60 * 60 * 1000;
-const EXPECTED_CACHE_VERSION = 6;
+const POLL_MS = 4000;
+const REFRESH_POLL_MS = 20000;
+const EXPECTED_CACHE_VERSION = 12;
+
+const FETCH_TIMEOUT_MS = 45000;
+const MAX_POLL_ATTEMPTS = 45;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
+let pollTimer = null;
+let hourlyTimer = null;
+let fetchInFlight = false;
+let pollAttempts = 0;
 
 const teamSelect = document.getElementById("team-select");
 const gameCountInput = document.getElementById("game-count");
@@ -15,7 +24,22 @@ const cacheStatusEl = document.getElementById("cache-status");
 const matchupGridEl = document.getElementById("matchup-grid");
 
 let hasDisplayedData = false;
-let refreshTimer = null;
+let lastContentFingerprint = "";
+
+function buildContentFingerprint(data) {
+  const { matchup, away, home, cachedAt } = data;
+  return JSON.stringify({ cachedAt, matchup, away, home });
+}
+
+function captureTableScroll() {
+  return [...document.querySelectorAll(".table-wrap")].map((el) => el.scrollLeft);
+}
+
+function restoreTableScroll(positions) {
+  document.querySelectorAll(".table-wrap").forEach((el, index) => {
+    if (positions[index] != null) el.scrollLeft = positions[index];
+  });
+}
 
 function pct(count, total) {
   if (!total) return "0%";
@@ -57,7 +81,7 @@ function showError(message) {
 function updateCacheStatus(data) {
   let text = `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
-  if (data.cacheVersion && data.cacheVersion < 6) {
+  if (data.cacheVersion && data.cacheVersion < 12) {
     text += " · 請按「立即更新」或 Ctrl+F5";
   }
   if (data.refreshing) text += " · 背景更新中…";
@@ -167,7 +191,7 @@ function pitcherInningCountsGrid(summary, games) {
   const total = games?.length || summary.totalGames || 0;
   return `
     <div class="inning-counts-wrap">
-      <p class="inning-counts-title">近 ${total} 次先發 · 各局掉分場數</p>
+      <p class="inning-counts-title">近 ${total} 次先發 · 各局掉分场数（依该场投球局数）</p>
       <div class="inning-counts-grid">
         ${[1, 2, 3, 4, 5, 6, 7, 8, 9]
           .map((inning) => {
@@ -316,25 +340,32 @@ function renderSideColumn(side, role) {
   const isAway = role === "客隊";
   const pitcherName = side.probablePitcher?.fullName ?? "尚未公布";
   const pitcher = side.pitcherAnalysis;
-  const totalLabel = `近 ${side.summary.totalGames} 場`;
+  const pitcherDisplayName = pitcher?.pitcherName ?? pitcherName;
+  const gameCount = side.summary.totalGames ?? 0;
+  const startCount = pitcher?.games?.length ?? pitcher?.summary?.totalGames ?? 10;
+  const totalLabel = `${side.teamName} 近 ${gameCount} 場`;
+  const teamClass = isAway ? "team-name-away" : "team-name-home";
+  const pitcherClass = isAway ? "pitcher-name-away" : "pitcher-name-home";
+  const pitcherMuted = pitcherName === "尚未公布" ? " muted" : ` ${pitcherClass}`;
 
   return `
     <article class="team-column ${isAway ? "away-column" : "home-column"}">
       <div class="column-head">
         <span class="role-badge ${isAway ? "away-badge" : "home-badge"}">${role}</span>
-        <h2>${side.teamName}</h2>
-        <p class="pitcher-line">先發投手：<span class="pitcher-name">${pitcherName}</span></p>
+        <div class="column-title-row">
+          <h2 class="${teamClass}">${side.teamName}</h2>
+          <span class="column-pitcher${pitcherMuted}">先發 ${pitcherName}</span>
+        </div>
       </div>
 
       <section class="panel-block">
-        <h3>近 ${side.summary.totalGames} 場 · 1–5 局得分</h3>
+        <h3><span class="${teamClass}">${side.teamName}</span> 近 ${gameCount} 場 · 1–5 局得分</h3>
         ${summaryCards(side.summary, totalLabel)}
         ${teamGamesTable(side.games)}
       </section>
 
       <section class="panel-block">
-        <p class="pitcher-section-name">${pitcher?.pitcherName ?? pitcherName}</p>
-        <h3>先發投手 · 近 ${pitcher?.games?.length ?? pitcher?.summary?.totalGames ?? 10} 次先發（逐局掉分 / 1–5 局失分）</h3>
+        <h3><span class="${pitcherClass}">${pitcherDisplayName}</span> 近 ${startCount} 次先發 · 1–5 局失分（逐局掉分）</h3>
         ${
           pitcher && pitcher.games.length
             ? `${pitcherSummaryCards(pitcher.summary, pitcher.games)}${pitcherGamesTable(pitcher.games)}`
@@ -345,10 +376,23 @@ function renderSideColumn(side, role) {
   `;
 }
 
-function renderMatchup(data) {
+function renderMatchup(data, { skipIfUnchanged = false } = {}) {
+  updateCacheStatus(data);
+
+  const fingerprint = buildContentFingerprint(data);
+  if (skipIfUnchanged && fingerprint === lastContentFingerprint) {
+    return false;
+  }
+
+  const tableScroll = captureTableScroll();
+  lastContentFingerprint = fingerprint;
+
   const { matchup, away, home } = data;
 
-  document.getElementById("matchup-title").textContent = `${away.teamName} @ ${home.teamName}`;
+  document.getElementById("matchup-title").innerHTML =
+    `<span class="team-name-away">${away.teamName}</span>` +
+    `<span class="at-symbol">@</span>` +
+    `<span class="team-name-home">${home.teamName}</span>`;
   const taiwanTime = formatGameTime(matchup.gameDate);
   const metaParts = [matchup.date];
   if (matchup.stadium) metaParts.push(matchup.stadium.replace(/\s+/g, " ").trim());
@@ -361,7 +405,8 @@ function renderMatchup(data) {
     ${renderSideColumn(home, "主隊")}
   `;
 
-  updateCacheStatus(data);
+  restoreTableScroll(tableScroll);
+  return true;
 }
 
 async function loadTeams() {
@@ -371,7 +416,7 @@ async function loadTeams() {
 
   teamSelect.innerHTML = teams
     .map((team) => {
-      const league = team.league === "CL" ? "セ" : "パ";
+      const league = team.league === "CL" ? "央聯" : "洋聯";
       return `<option value="${team.id}">${team.nameZh} (${league})</option>`;
     })
     .join("");
@@ -380,8 +425,52 @@ async function loadTeams() {
   teamSelect.value = savedTeam || String(DEFAULT_TEAM_ID);
 }
 
+function isDataReady(data) {
+  if (data.loading) return false;
+  return (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
+}
+
+function setBusy(isBusy, message) {
+  showLoading(isBusy);
+  teamSelect.disabled = isBusy;
+  refreshBtn.disabled = isBusy;
+  if (message) cacheStatusEl.textContent = message;
+}
+
+function clearPollTimer() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function clearHourlyTimer() {
+  if (hourlyTimer) {
+    clearInterval(hourlyTimer);
+    hourlyTimer = null;
+  }
+}
+
+function fetchWithTimeout(url) {
+  if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) {
+    return fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+function schedulePoll(slow = false) {
+  clearPollTimer();
+  pollTimer = setTimeout(
+    () => fetchAnalysis(false, true, true),
+    slow ? REFRESH_POLL_MS : POLL_MS
+  );
+}
+
 function needsFreshData(data, games) {
-  if (!data.cacheVersion || data.cacheVersion < expectedCacheVersion) {
+  const hasUsableData = isDataReady(data);
+  if ((!data.cacheVersion || data.cacheVersion < expectedCacheVersion) && !hasUsableData) {
     return true;
   }
   for (const side of ["away", "home"]) {
@@ -401,58 +490,77 @@ function needsFreshData(data, games) {
   return false;
 }
 
-async function fetchAnalysis(force = false, allowAutoRetry = true) {
+async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = false) {
   const teamId = teamSelect.value;
   const games = Number(gameCountInput.value) || 10;
   if (!teamId) return;
+  if (fetchInFlight && isPoll) return;
 
   localStorage.setItem(STORAGE_KEY, teamId);
   showError("");
+  fetchInFlight = true;
 
-  const firstLoad = !hasDisplayedData;
-  if (firstLoad) {
-    showLoading(true);
-    resultsEl.classList.add("hidden");
-  } else if (force) {
-    cacheStatusEl.textContent = "正在更新資料…";
+  let ready = false;
+  if (!isPoll) {
+    pollAttempts = 0;
+    setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
+    resultsEl.classList.remove("hidden");
   }
 
   try {
     const query = new URLSearchParams({ team_id: teamId, games: String(games) });
     if (force) query.set("force", "true");
 
-    const resp = await fetch(`/api/npb/matchup?${query}`);
+    const resp = await fetchWithTimeout(`/api/npb/matchup?${query}`);
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
     if (!force && allowAutoRetry && needsFreshData(data, games)) {
       cacheStatusEl.textContent = "偵測到舊資料，正在自動更新…";
-      return fetchAnalysis(true, false);
+      fetchInFlight = false;
+      setBusy(false);
+      return fetchAnalysis(true, false, isPoll);
     }
 
-    renderMatchup(data);
-    resultsEl.classList.remove("hidden");
+    renderMatchup(data, { skipIfUnchanged: isPoll });
     hasDisplayedData = true;
+    ready = isDataReady(data);
 
-    if (data.refreshing && !force) scheduleSilentRefresh();
+    if (!ready) {
+      pollAttempts += 1;
+      if (pollAttempts >= MAX_POLL_ATTEMPTS) {
+        ready = true;
+        showError("資料載入逾時，請按「立即更新」重試。");
+        clearPollTimer();
+        return;
+      }
+      cacheStatusEl.textContent = `資料準備中，自動更新中…（${pollAttempts}/${MAX_POLL_ATTEMPTS}）`;
+      schedulePoll(false);
+      return;
+    }
+
+    pollAttempts = 0;
+    clearPollTimer();
+    if (data.refreshing) schedulePoll(true);
   } catch (err) {
-    if (err.message === "Failed to fetch" || err.name === "TypeError") {
-      showError("無法連線。請確認 run.bat 已執行且視窗保持開啟。");
+    clearPollTimer();
+    ready = true;
+    if (err.name === "AbortError" || err.name === "TimeoutError") {
+      showError("連線逾時，請按「立即更新」重試。");
+    } else if (err.message === "Failed to fetch" || err.name === "TypeError") {
+      showError("無法連線，請稍後再試或重新整理頁面。");
     } else {
       showError(err.message || "發生未知錯誤");
     }
   } finally {
-    showLoading(false);
+    fetchInFlight = false;
+    setBusy(false);
   }
 }
 
-function scheduleSilentRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer);
-  refreshTimer = setTimeout(() => fetchAnalysis(false), 20000);
-}
-
 function scheduleHourlyRefresh() {
-  setInterval(() => fetchAnalysis(false), REFRESH_MS);
+  clearHourlyTimer();
+  hourlyTimer = setInterval(() => fetchAnalysis(false, true, false), REFRESH_MS);
 }
 
 async function loadMeta() {
@@ -470,6 +578,19 @@ async function loadMeta() {
 refreshBtn.addEventListener("click", () => fetchAnalysis(true));
 teamSelect.addEventListener("change", () => fetchAnalysis(false));
 gameCountInput.addEventListener("change", () => fetchAnalysis(false));
+
+window.addEventListener("pagehide", () => {
+  clearPollTimer();
+  clearHourlyTimer();
+});
+
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  fetchInFlight = false;
+  clearPollTimer();
+  setBusy(false);
+  fetchAnalysis(false, true, false);
+});
 
 loadTeams()
   .then(() => loadMeta())

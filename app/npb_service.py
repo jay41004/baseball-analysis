@@ -13,15 +13,19 @@ from bs4 import BeautifulSoup
 from app.npb_teams import TEAM_BY_ID, list_teams, match_team, team_zh
 
 NPB_BASE = "https://npb.jp"
-GAME_PARSER_VERSION = 3
+GAME_PARSER_VERSION = 5
 JST = timezone(timedelta(hours=9))
+# npb.jp lists matchups as HOME - AWAY (e.g. 巨人 - 中日 at 東京ドーム).
 FINAL_SCORE_RE = re.compile(
-    r"^(?P<away>.+?)\s+(?P<awayScore>\d+)\s*-\s*(?P<homeScore>\d+)\s+(?P<home>.+)$"
+    r"^(?P<home>.+?)\s+(?P<homeScore>\d+)\s*-\s*(?P<awayScore>\d+)\s+(?P<away>.+)$"
 )
-UPCOMING_RE = re.compile(r"^(?P<away>.+?)\s*-\s*(?P<home>.+)$")
+UPCOMING_RE = re.compile(r"^(?P<home>.+?)\s*-\s*(?P<away>.+)$")
 DATE_RE = re.compile(r"^(?P<month>\d+)/(?P<day>\d+)（")
 STARTER_RE = re.compile(r"先発[：:]\s*([^\s先発]+)")
 PROBABLE_RE = re.compile(r"(?:\(予\)|先発[：:])\s*([^\s(先発]+)")
+PBP_STARTER_RE = re.compile(r"（先発投手）(.+?)(?:\s|$|（|）)")
+PBP_CHANGE_RE = re.compile(r"（投手交代）(.+?)→(.+?)(?:\s|$|（|）)")
+PBP_RBI_RE = re.compile(r"打点(\d+)")
 
 
 class NpbClient:
@@ -33,6 +37,7 @@ class NpbClient:
         )
         self._schedule_cache: list[dict[str, Any]] | None = None
         self._game_cache: dict[str, dict[str, Any]] = {}
+        self._playbyplay_cache: dict[str, str] = {}
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -101,7 +106,8 @@ class NpbClient:
             away = parsed["away"]
             home = parsed["home"]
             status = parsed["status"]
-            away_starter, home_starter = self._parse_probable_pitchers(pitchers)
+            # npb.jp lists probable pitchers in HOME then AWAY order (same as team names).
+            home_starter, away_starter = self._parse_probable_pitchers(pitchers)
 
             rows.append(
                 {
@@ -141,8 +147,8 @@ class NpbClient:
 
         final = FINAL_SCORE_RE.match(text)
         if final:
-            away = match_team(final.group("away"))
             home = match_team(final.group("home"))
+            away = match_team(final.group("away"))
             if not away or not home:
                 return None
             return {
@@ -155,8 +161,8 @@ class NpbClient:
 
         upcoming = UPCOMING_RE.match(text)
         if upcoming:
-            away = match_team(upcoming.group("away"))
             home = match_team(upcoming.group("home"))
+            away = match_team(upcoming.group("away"))
             if not away or not home:
                 return None
             return {"away": away, "home": home, "status": "Scheduled"}
@@ -164,6 +170,7 @@ class NpbClient:
         return None
 
     def _parse_probable_pitchers(self, note: str) -> tuple[str | None, str | None]:
+        """Return (home_starter, away_starter) in npb.jp schedule order."""
         if not note:
             return None, None
         starters = STARTER_RE.findall(note)
@@ -192,6 +199,27 @@ class NpbClient:
         if parsed:
             self._game_cache[cache_key] = parsed
         return parsed
+
+    def _playbyplay_url(self, href: str) -> str:
+        if href.startswith("http"):
+            base = href.rstrip("/")
+        else:
+            base = f"{NPB_BASE}{href}".rstrip("/")
+        if base.endswith(".html"):
+            base = base.rsplit("/", 1)[0]
+        return f"{base}/playbyplay.html"
+
+    async def fetch_playbyplay(self, href: str) -> str | None:
+        url = self._playbyplay_url(href)
+        if url in self._playbyplay_cache:
+            return self._playbyplay_cache[url]
+        try:
+            resp = await self._http.get(url)
+            resp.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        self._playbyplay_cache[url] = resp.text
+        return resp.text
 
     def _parse_game_page(self, html: str, href: str) -> dict[str, Any] | None:
         soup = BeautifulSoup(html, "html.parser")
@@ -301,6 +329,57 @@ def opponent_runs_by_inning(opp_innings: list[int], max_inning: int = 9) -> list
     return [(opp_innings[index] if index < len(opp_innings) else 0) for index in range(max_inning)]
 
 
+def _defensive_half_label(is_home: bool) -> str:
+    # Away team pitches the bottom half; home team pitches the top half.
+    return "表" if is_home else "裏"
+
+
+def _parse_pitcher_runs_from_playbyplay(
+    html: str, is_home: bool, pitcher_name: str
+) -> list[int]:
+    """Runs allowed by pitcher in each inning (index 0 = inning 1) from npb.jp play-by-play."""
+    soup = BeautifulSoup(html, "html.parser")
+    defend_half = _defensive_half_label(is_home)
+    runs = [0] * 9
+    current_pitcher: str | None = None
+
+    for heading in soup.find_all("h5"):
+        title = heading.get_text(strip=True)
+        match = re.match(r"(\d+)回(表|裏)", title)
+        if not match:
+            continue
+        inning = int(match.group(1))
+        half = match.group(2)
+        if half != defend_half or inning < 1 or inning > 9:
+            continue
+
+        for element in heading.find_all_next(["tr", "h5"]):
+            if element.name == "h5":
+                break
+            row = element.get_text(" ", strip=True)
+            if not row:
+                continue
+
+            starter = PBP_STARTER_RE.search(row)
+            if starter:
+                current_pitcher = starter.group(1).strip()
+                continue
+
+            change = PBP_CHANGE_RE.search(row)
+            if change:
+                outgoing = change.group(1).strip()
+                incoming = change.group(2).strip()
+                if current_pitcher and _pitcher_name_matches(pitcher_name, outgoing):
+                    runs[inning - 1] += sum(int(value) for value in PBP_RBI_RE.findall(row))
+                current_pitcher = incoming
+                continue
+
+            if current_pitcher and _pitcher_name_matches(pitcher_name, current_pitcher):
+                runs[inning - 1] += sum(int(value) for value in PBP_RBI_RE.findall(row))
+
+    return runs
+
+
 def summarize_thresholds(runs_list: list[int]) -> dict[str, Any]:
     total = len(runs_list)
     return {
@@ -360,10 +439,11 @@ async def fetch_next_matchup(client: NpbClient, focus_team_id: int) -> dict[str,
     if not upcoming:
         return None
 
-    def sort_key(game: dict[str, Any]) -> tuple[str, str]:
+    def sort_key(game: dict[str, Any]) -> tuple[str, int, str]:
         game_date = game.get("date") or "9999-99-99"
         start = game.get("startTime") or "99:99"
-        return (game_date, start)
+        has_pitchers = int(not (game.get("awayProbablePitcher") and game.get("homeProbablePitcher")))
+        return (game_date, has_pitchers, start)
 
     upcoming.sort(key=sort_key)
     game = upcoming[0]
@@ -450,14 +530,25 @@ async def analyze_team_scoring(
 
 
 def _build_pitcher_start_row(
-    meta: dict[str, Any], parsed: dict[str, Any], team_id: int
+    meta: dict[str, Any],
+    parsed: dict[str, Any],
+    team_id: int,
+    pitcher_name: str,
+    *,
+    pitcher_runs_by_inning: list[int] | None = None,
 ) -> dict[str, Any]:
     is_home = parsed["homeTeamId"] == team_id
     side = "home" if is_home else "away"
     opp_innings = parsed["awayInnings" if is_home else "homeInnings"]
-    runs_by_inning = opponent_runs_by_inning(opp_innings)
+    if pitcher_runs_by_inning is not None:
+        runs_by_inning = pitcher_runs_by_inning[:9]
+        while len(runs_by_inning) < 9:
+            runs_by_inning.append(0)
+        first_five_allowed = first_n_runs(runs_by_inning, 5)
+    else:
+        runs_by_inning = opponent_runs_by_inning(opp_innings)
+        first_five_allowed = first_n_runs(opp_innings, 5)
     first_inning_allowed = runs_by_inning[0]
-    first_five_allowed = first_n_runs(opp_innings, 5)
     opponent_id = parsed["awayTeamId" if is_home else "homeTeamId"]
     return {
         "date": meta.get("date"),
@@ -503,7 +594,19 @@ async def analyze_pitcher_starts(
         starter = parsed.get(f"{side}Starter")
         if not starter or not _pitcher_name_matches(pitcher_name, starter):
             return None
-        return _build_pitcher_start_row(meta, parsed, team_id)
+        pbp_html = await client.fetch_playbyplay(meta["href"])
+        pbp_runs = (
+            _parse_pitcher_runs_from_playbyplay(pbp_html, is_home, pitcher_name)
+            if pbp_html
+            else None
+        )
+        return _build_pitcher_start_row(
+            meta,
+            parsed,
+            team_id,
+            pitcher_name,
+            pitcher_runs_by_inning=pbp_runs,
+        )
 
     rows: list[dict[str, Any]] = []
     batch_size = 15

@@ -64,9 +64,19 @@ async def fetch_recent_final_games(team_id: int, count: int = 10) -> list[dict[s
         for d in data.get("dates", [])
         for g in d.get("games", [])
         if g.get("status", {}).get("abstractGameState") == "Final"
+        and g.get("status", {}).get("detailedState") != "Postponed"
     ]
     games.sort(key=lambda g: g.get("officialDate", ""), reverse=True)
-    return games[:count]
+
+    seen: set[int] = set()
+    unique: list[dict[str, Any]] = []
+    for game in games:
+        game_pk = game.get("gamePk")
+        if game_pk in seen:
+            continue
+        seen.add(game_pk)
+        unique.append(game)
+    return unique[:count]
 
 
 def _team_side(game: dict[str, Any], team_id: int) -> str:

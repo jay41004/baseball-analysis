@@ -24,12 +24,15 @@ body {
     var(--bg);
   color: var(--text);
   min-height: 100vh;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 
 .page {
   max-width: 1400px;
   margin: 0 auto;
   padding: 32px 20px 48px;
+  overflow-x: hidden;
 }
 
 .header {
@@ -230,8 +233,48 @@ button:hover {
 }
 
 .column-head h2 {
-  margin: 10px 0 8px;
+  margin: 0;
   font-size: 1.5rem;
+}
+
+.team-name-away {
+  color: #e2e8f0;
+}
+
+.team-name-home {
+  color: #7dd3fc;
+}
+
+.pitcher-name-away {
+  color: #fbbf24;
+}
+
+.pitcher-name-home {
+  color: #6ee7a0;
+}
+
+.matchup-title .at-symbol {
+  color: var(--muted);
+  font-weight: 400;
+  margin: 0 0.35em;
+}
+
+.column-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 16px;
+  margin-top: 10px;
+}
+
+.column-pitcher {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.column-pitcher.muted {
+  color: var(--muted);
+  font-weight: 500;
 }
 
 .role-badge {
@@ -389,6 +432,8 @@ button:hover {
 
 .table-wrap {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 table {
@@ -507,13 +552,9 @@ td {
   color: var(--muted);
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1200px) {
   .matchup-grid {
     grid-template-columns: 1fr;
-  }
-
-  .inning-counts-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .away-column {
@@ -522,6 +563,12 @@ td {
 
   .home-column {
     order: 2;
+  }
+}
+
+@media (max-width: 960px) {
+  .inning-counts-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
