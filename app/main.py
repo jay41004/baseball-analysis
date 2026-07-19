@@ -185,7 +185,7 @@ async def api_matchup(
             return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
 
         if cached:
-            needs_refresh = mlb_is_stale(cached["updatedAt"])
+            needs_refresh = is_stale(cached["updatedAt"])
             if needs_refresh and not mlb_is_refreshing(team_id, games):
                 asyncio.create_task(refresh_matchup(team_id, games))
                 return _wrap_mlb_matchup(team_id, cached, refreshing=True)
