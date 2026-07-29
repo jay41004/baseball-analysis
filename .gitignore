@@ -16,3 +16,4 @@ verify_*
 !data/cpbl_season_batting_*.json
 !data/cpbl_vs_pitcher_*.json
 !data/cpbl_risp_batting_*.json
+!docs/data/**/*.json
