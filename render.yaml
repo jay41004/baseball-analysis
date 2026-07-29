@@ -1,4 +1,4 @@
-# Render Blueprint: https://render.com/docs/blueprint-spec
+# Render Blueprint — read-only cloud mode (no cron; use GitHub Pages for mobile)
 
 services:
 
@@ -22,44 +22,10 @@ services:
 
         value: "3.12.8"
 
+      - key: CLOUD_LITE
+
+        value: "1"
+
       - key: REFRESH_SECONDS
 
         value: "3600"
-
-      - key: KEEPALIVE_SECONDS
-
-        value: "300"
-
-      - key: WARMUP_START_DELAY
-
-        value: "300"
-
-      - key: NPB_WARMUP_CONCURRENCY
-
-        value: "1"
-
-      - key: MLB_WARMUP_CONCURRENCY
-
-        value: "1"
-
-      - key: CPBL_WARMUP_CONCURRENCY
-
-        value: "1"
-
-      - key: CPBL_DEFERRED_REFRESH_SECONDS
-
-        value: "300"
-
-
-
-  - type: cron
-
-    name: baseball-analysis-keepalive
-
-    runtime: python
-
-    schedule: "*/5 * * * *"
-
-    buildCommand: pip install httpx
-
-    startCommand: python -c "import httpx; r=httpx.get('https://baseball-analysis.onrender.com/health', timeout=120); print(r.status_code)"

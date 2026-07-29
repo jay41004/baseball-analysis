@@ -431,7 +431,7 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 }
 
 async function loadTeams() {
-  const { resp, data: teams } = await ApiUtils.fetchJson("/api/npb/teams", fetchWithTimeout, {
+  const { resp, data: teams } = await ApiUtils.fetchJson(SiteConfig.npbTeams(), fetchWithTimeout, {
     onWaiting(n, total) {
       cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
     },
@@ -536,10 +536,12 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
   }
 
   try {
-    const query = new URLSearchParams({ team_id: teamId, games: String(games) });
-    if (force) query.set("force", "true");
+    if (force && SiteConfig.isStatic) {
+      cacheStatusEl.textContent = "靜態網站：資料隨更新部署，無法即時刷新";
+    }
 
-    const { resp, data } = await ApiUtils.fetchJson(`/api/npb/matchup?${query}`, fetchWithTimeout, {
+    const url = SiteConfig.npbMatchup(teamId, games, force && !SiteConfig.isStatic);
+    const { resp, data } = await ApiUtils.fetchJson(url, fetchWithTimeout, {
       onWaiting(n, total) {
         cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
       },

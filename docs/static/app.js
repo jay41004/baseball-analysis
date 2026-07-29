@@ -1,12 +1,12 @@
-const DEFAULT_TEAM_ID = 5;
-const STORAGE_KEY = "cpbl_last_team";
+const PHILADELPHIA_ID = 143;
+const STORAGE_KEY = "mlb_last_team";
 const REFRESH_MS = 60 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
-const EXPECTED_CACHE_VERSION = 10;
+const EXPECTED_CACHE_VERSION = 13;
 
 const FETCH_TIMEOUT_MS = 90000;
-const MAX_POLL_ATTEMPTS = 120;
+const MAX_POLL_ATTEMPTS = 60;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
 let pollTimer = null;
@@ -64,7 +64,7 @@ function formatGameTime(iso) {
   });
 }
 
-function showLoading(show, message = "正在抓取 CPBL 數據...") {
+function showLoading(show, message = "正在抓取 MLB 數據...") {
   loadingEl.textContent = message;
   loadingEl.classList.toggle("hidden", !show);
 }
@@ -82,9 +82,6 @@ function showError(message) {
 function updateCacheStatus(data) {
   let text = `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
-  if (data.cacheVersion && data.cacheVersion < expectedCacheVersion) {
-    text += " · 請按「立即更新」或 Ctrl+F5";
-  }
   if (data.refreshing) text += " · 背景更新中…";
   cacheStatusEl.textContent = text;
 }
@@ -93,6 +90,12 @@ function ouBadge(isOver) {
   return isOver
     ? '<span class="badge over">Over</span>'
     : '<span class="badge under">Under</span>';
+}
+
+function resultBadge(isWin) {
+  return isWin
+    ? '<span class="badge win">W</span>'
+    : '<span class="badge loss">L</span>';
 }
 
 function summaryCards(summary, totalLabel) {
@@ -165,21 +168,19 @@ function formatScoredInnings(game) {
 }
 
 function buildInningScoredCounts(summary, games) {
+  const raw = summary?.inningScoredCounts;
+  if (raw && Object.values(raw).some((value) => value > 0)) {
+    return raw;
+  }
+
   const counts = Object.fromEntries(
     [1, 2, 3, 4, 5, 6, 7, 8, 9].map((inning) => [String(inning), 0])
   );
   if (!games?.length) {
-    return summary?.inningScoredCounts || counts;
+    return raw || counts;
   }
 
   for (const game of games) {
-    const runsByInning = game.runsByInning || [];
-    if (runsByInning.length) {
-      runsByInning.forEach((runs, index) => {
-        if (runs > 0 && index < 9) counts[String(index + 1)] += 1;
-      });
-      continue;
-    }
     const scored = new Set(game.scoredInnings || []);
     if (game.firstInningScored) scored.add(1);
     for (const inning of scored) {
@@ -191,10 +192,10 @@ function buildInningScoredCounts(summary, games) {
 
 function pitcherInningCountsGrid(summary, games) {
   const counts = buildInningScoredCounts(summary, games);
-  const total = games?.length || summary.totalGames || 0;
+  const total = summary.totalGames || 0;
   return `
     <div class="inning-counts-wrap">
-      <p class="inning-counts-title">近 ${total} 次先發 · 各局掉分场数（依该场投球局数）</p>
+      <p class="inning-counts-title">近 ${total} 次先發 · 各局掉分場數</p>
       <div class="inning-counts-grid">
         ${[1, 2, 3, 4, 5, 6, 7, 8, 9]
           .map((inning) => {
@@ -216,7 +217,7 @@ function pitcherInningCountsGrid(summary, games) {
 function pitcherSummaryCards(summary, games) {
   const counts = buildInningScoredCounts(summary, games);
   const firstInningScored = counts["1"] ?? summary.firstInningScored ?? 0;
-  const total = games?.length || summary.totalGames || 0;
+  const total = summary.totalGames || 0;
   return `
     <div class="summary-grid compact">
       <article class="stat-card highlight span-2">
@@ -388,7 +389,7 @@ function renderSideColumn(side, role) {
         ${
           pitcher && pitcher.games.length
             ? `${pitcherSummaryCards(pitcher.summary, pitcher.games)}${pitcherGamesTable(pitcher.games)}`
-            : `<p class="empty-note">${pitcherName === "尚未公布" ? "CPBL 尚未公布先發投手" : "找不到此投手近期先發數據"}</p>`
+            : `<p class="empty-note">${pitcherName === "尚未公布" ? "MLB 尚未公布先發投手" : "找不到此投手近期先發數據"}</p>`
         }
       </section>
     </article>
@@ -414,7 +415,6 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
     `<span class="team-name-home">${home.teamName}</span>`;
   const taiwanTime = formatGameTime(matchup.gameDate);
   const metaParts = [matchup.date];
-  if (matchup.stadium) metaParts.push(matchup.stadium.replace(/\s+/g, " ").trim());
   if (taiwanTime) metaParts.push(`台灣 ${taiwanTime}`);
   metaParts.push(matchup.status || "Scheduled");
   document.getElementById("matchup-meta").textContent = metaParts.join(" · ");
@@ -431,7 +431,7 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 }
 
 async function loadTeams() {
-  const { resp, data: teams } = await ApiUtils.fetchJson(SiteConfig.cpblTeams(), fetchWithTimeout, {
+  const { resp, data: teams } = await ApiUtils.fetchJson(SiteConfig.mlbTeams(), fetchWithTimeout, {
     onWaiting(n, total) {
       cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
     },
@@ -439,11 +439,11 @@ async function loadTeams() {
   if (!resp.ok) throw new Error("無法載入球隊列表");
 
   teamSelect.innerHTML = teams
-    .map((team) => `<option value="${team.id}">${team.nameZh}</option>`)
+    .map((team) => `<option value="${team.id}">${team.nameZh} (${team.abbreviation})</option>`)
     .join("");
 
   const savedTeam = localStorage.getItem(STORAGE_KEY);
-  teamSelect.value = savedTeam || String(DEFAULT_TEAM_ID);
+  teamSelect.value = savedTeam || String(PHILADELPHIA_ID);
 }
 
 function isDataReady(data) {
@@ -502,9 +502,36 @@ function teamGamesMissingScores(data) {
 
 function needsFreshData(data, games) {
   if (isDataReady(data)) {
-    return teamGamesMissingScores(data);
+    if (teamGamesMissingScores(data)) {
+      return true;
+    }
+    return false;
+  }
+  if (!data.cacheVersion || data.cacheVersion < expectedCacheVersion) {
+    return true;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  for (const side of ["away", "home"]) {
+    for (const game of data[side]?.games ?? []) {
+      if (game.date > today) return true;
+      if (game.result == null && game.firstFiveRuns === 0 && game.opponentStarter == null) {
+        return true;
+      }
+    }
   }
   return false;
+}
+
+async function loadMeta() {
+  try {
+    const resp = await fetch("/api/meta");
+    if (resp.ok) {
+      const meta = await resp.json();
+      if (meta.mlbCacheVersion) expectedCacheVersion = meta.mlbCacheVersion;
+    }
+  } catch (_) {
+    /* server offline */
+  }
 }
 
 async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = false) {
@@ -537,7 +564,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       cacheStatusEl.textContent = "靜態網站：資料隨更新部署，無法即時刷新";
     }
 
-    const url = SiteConfig.cpblMatchup(teamId, games, force && !SiteConfig.isStatic);
+    const url = SiteConfig.mlbMatchup(teamId, games, force && !SiteConfig.isStatic);
     const { resp, data } = await ApiUtils.fetchJson(url, fetchWithTimeout, {
       onWaiting(n, total) {
         cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
@@ -558,12 +585,12 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     ready = isDataReady(data);
     if (ready) {
       LineupLoader.ensureLineups(data.startingLineups, {
-        apiPath: "/api/cpbl",
+        apiPath: "/api/mlb",
         teamId,
         games,
         fetchWithTimeout,
       });
-      syncATable("/api/cpbl", teamId, data.aTable, { force, matchReady: true });
+      syncATable("/api/mlb", teamId, data.aTable, { force, matchReady: true });
     }
 
     if (!ready) {
@@ -576,7 +603,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       }
       const waitMsg = hasDisplayedData
         ? `正在載入此隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}）`
-        : `正在抓取本隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}，首次約 3～5 分鐘）`;
+        : `正在抓取本隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}，約 1～2 分鐘）`;
       cacheStatusEl.textContent = waitMsg;
       schedulePoll(false);
       return;
@@ -613,25 +640,12 @@ function scheduleHourlyRefresh() {
   hourlyTimer = setInterval(() => fetchAnalysis(false, true, false), REFRESH_MS);
 }
 
-async function loadMeta() {
-  try {
-    const resp = await fetch("/api/meta");
-    if (resp.ok) {
-      const meta = await resp.json();
-      if (meta.cpblCacheVersion) expectedCacheVersion = meta.cpblCacheVersion;
-    }
-  } catch (_) {
-    /* server offline */
-  }
-}
-
 refreshBtn.addEventListener("click", () => fetchAnalysis(true));
 teamSelect.addEventListener("change", () => fetchAnalysis(false));
 gameCountInput.addEventListener("change", () => fetchAnalysis(false));
 
 window.addEventListener("pagehide", () => {
   clearPollTimer();
-  LineupLoader.clearDisplayedLineups();
   clearHourlyTimer();
 });
 

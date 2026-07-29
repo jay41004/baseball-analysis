@@ -1,12 +1,12 @@
-const DEFAULT_TEAM_ID = 5;
-const STORAGE_KEY = "cpbl_last_team";
+const DEFAULT_TEAM_ID = 1;
+const STORAGE_KEY = "npb_last_team";
 const REFRESH_MS = 60 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
-const EXPECTED_CACHE_VERSION = 10;
+const EXPECTED_CACHE_VERSION = 18;
 
 const FETCH_TIMEOUT_MS = 90000;
-const MAX_POLL_ATTEMPTS = 120;
+const MAX_POLL_ATTEMPTS = 60;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
 let pollTimer = null;
@@ -64,7 +64,7 @@ function formatGameTime(iso) {
   });
 }
 
-function showLoading(show, message = "正在抓取 CPBL 數據...") {
+function showLoading(show, message = "正在抓取 NPB 數據...") {
   loadingEl.textContent = message;
   loadingEl.classList.toggle("hidden", !show);
 }
@@ -82,7 +82,7 @@ function showError(message) {
 function updateCacheStatus(data) {
   let text = `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
-  if (data.cacheVersion && data.cacheVersion < expectedCacheVersion) {
+  if (data.cacheVersion && data.cacheVersion < 12) {
     text += " · 請按「立即更新」或 Ctrl+F5";
   }
   if (data.refreshing) text += " · 背景更新中…";
@@ -388,7 +388,7 @@ function renderSideColumn(side, role) {
         ${
           pitcher && pitcher.games.length
             ? `${pitcherSummaryCards(pitcher.summary, pitcher.games)}${pitcherGamesTable(pitcher.games)}`
-            : `<p class="empty-note">${pitcherName === "尚未公布" ? "CPBL 尚未公布先發投手" : "找不到此投手近期先發數據"}</p>`
+            : `<p class="empty-note">${pitcherName === "尚未公布" ? "NPB 尚未公布先發投手" : "找不到此投手近期先發數據"}</p>`
         }
       </section>
     </article>
@@ -431,7 +431,7 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 }
 
 async function loadTeams() {
-  const { resp, data: teams } = await ApiUtils.fetchJson(SiteConfig.cpblTeams(), fetchWithTimeout, {
+  const { resp, data: teams } = await ApiUtils.fetchJson(SiteConfig.npbTeams(), fetchWithTimeout, {
     onWaiting(n, total) {
       cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
     },
@@ -439,7 +439,10 @@ async function loadTeams() {
   if (!resp.ok) throw new Error("無法載入球隊列表");
 
   teamSelect.innerHTML = teams
-    .map((team) => `<option value="${team.id}">${team.nameZh}</option>`)
+    .map((team) => {
+      const league = team.league === "CL" ? "央聯" : "洋聯";
+      return `<option value="${team.id}">${team.nameZh} (${league})</option>`;
+    })
     .join("");
 
   const savedTeam = localStorage.getItem(STORAGE_KEY);
@@ -504,7 +507,7 @@ function needsFreshData(data, games) {
   if (isDataReady(data)) {
     return teamGamesMissingScores(data);
   }
-  return false;
+  return !data.cacheVersion || data.cacheVersion < expectedCacheVersion;
 }
 
 async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = false) {
@@ -537,7 +540,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       cacheStatusEl.textContent = "靜態網站：資料隨更新部署，無法即時刷新";
     }
 
-    const url = SiteConfig.cpblMatchup(teamId, games, force && !SiteConfig.isStatic);
+    const url = SiteConfig.npbMatchup(teamId, games, force && !SiteConfig.isStatic);
     const { resp, data } = await ApiUtils.fetchJson(url, fetchWithTimeout, {
       onWaiting(n, total) {
         cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
@@ -558,12 +561,12 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     ready = isDataReady(data);
     if (ready) {
       LineupLoader.ensureLineups(data.startingLineups, {
-        apiPath: "/api/cpbl",
+        apiPath: "/api/npb",
         teamId,
         games,
         fetchWithTimeout,
       });
-      syncATable("/api/cpbl", teamId, data.aTable, { force, matchReady: true });
+      syncATable("/api/npb", teamId, data.aTable, { force, matchReady: true });
     }
 
     if (!ready) {
@@ -576,7 +579,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       }
       const waitMsg = hasDisplayedData
         ? `正在載入此隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}）`
-        : `正在抓取本隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}，首次約 3～5 分鐘）`;
+        : `正在抓取本隊資料…（${pollAttempts}/${MAX_POLL_ATTEMPTS}，約 1～2 分鐘）`;
       cacheStatusEl.textContent = waitMsg;
       schedulePoll(false);
       return;
@@ -618,7 +621,7 @@ async function loadMeta() {
     const resp = await fetch("/api/meta");
     if (resp.ok) {
       const meta = await resp.json();
-      if (meta.cpblCacheVersion) expectedCacheVersion = meta.cpblCacheVersion;
+      if (meta.npbCacheVersion) expectedCacheVersion = meta.npbCacheVersion;
     }
   } catch (_) {
     /* server offline */
@@ -631,7 +634,6 @@ gameCountInput.addEventListener("change", () => fetchAnalysis(false));
 
 window.addEventListener("pagehide", () => {
   clearPollTimer();
-  LineupLoader.clearDisplayedLineups();
   clearHourlyTimer();
 });
 

@@ -77,6 +77,7 @@ from app.npb_scheduler import refresh_a_table as refresh_npb_a_table
 from app.npb_scheduler import refresh_all_matchups as refresh_all_npb_matchups
 from app.npb_scheduler import start_npb_cache_services
 from app.cloud_keepalive import cloud_keepalive_loop
+from app.cloud_lite import is_cloud_lite
 from app.scheduler import refresh_matchup, is_refreshing as mlb_is_refreshing
 from app.scheduler import is_refreshing_a_table as mlb_is_refreshing_a_table
 from app.scheduler import is_warming_all as mlb_is_warming_all
@@ -88,6 +89,11 @@ from app.scheduler import start_cache_services
 from app.inning_comparison import a_table_payload_complete
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _schedule(coro) -> None:
+    if not is_cloud_lite():
+        asyncio.create_task(coro)
 
 
 def _attach_a_table(
@@ -107,8 +113,8 @@ def _attach_a_table(
         merged["aTable"] = copy.deepcopy(entry["data"])
         return merged
 
-    if not is_refreshing_table(team_id):
-        asyncio.create_task(refresh_table(team_id))
+    if not is_refreshing_table(team_id) and not is_cloud_lite():
+        _schedule(refresh_table(team_id))
     return payload
 
 
@@ -175,15 +181,19 @@ async def lifespan(app: FastAPI):
             logger.exception("Background cache boot failed")
 
     boot_task = asyncio.create_task(_boot_cache_services())
-    keepalive_task = asyncio.create_task(cloud_keepalive_loop())
+    keepalive_task = None
+    if not is_cloud_lite():
+        keepalive_task = asyncio.create_task(cloud_keepalive_loop())
     try:
         yield
     finally:
         boot_task.cancel()
-        keepalive_task.cancel()
+        if keepalive_task:
+            keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await boot_task
-            await keepalive_task
+            if keepalive_task:
+                await keepalive_task
 
 
 app = FastAPI(title="棒球前五局分析", lifespan=lifespan)
@@ -224,13 +234,13 @@ async def api_warmup():
     cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
     ready = mlb_cached >= 30 and npb_cached >= 12 and cpbl_cached >= 6
 
-    if not ready:
+    if not ready and not is_cloud_lite():
         if mlb_cached < 30 and not mlb_is_warming_all():
-            asyncio.create_task(refresh_all_mlb_matchups(DEFAULT_GAMES))
+            _schedule(refresh_all_mlb_matchups(DEFAULT_GAMES))
         if npb_cached < 12 and not npb_is_warming_all():
-            asyncio.create_task(refresh_all_npb_matchups(DEFAULT_GAMES))
+            _schedule(refresh_all_npb_matchups(DEFAULT_GAMES))
         if cpbl_cached < 6 and not cpbl_is_warming_all():
-            asyncio.create_task(refresh_all_cpbl_matchups(DEFAULT_GAMES))
+            _schedule(refresh_all_cpbl_matchups(DEFAULT_GAMES))
 
     return {
         "status": "ready" if ready else "warming",
@@ -281,22 +291,25 @@ async def api_matchup(
     try:
         cached = get_matchup(team_id, games)
 
-        if force:
+        if force and not is_cloud_lite():
             if not mlb_is_refreshing(team_id, games):
-                asyncio.create_task(refresh_matchup(team_id, games))
+                _schedule(refresh_matchup(team_id, games))
             if cached:
                 return _wrap_mlb_matchup(team_id, cached, refreshing=True)
             return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
 
+        if force and cached:
+            return _wrap_mlb_matchup(team_id, cached, refreshing=False)
+
         if cached:
-            needs_refresh = is_stale(cached["updatedAt"])
+            needs_refresh = is_stale(cached["updatedAt"]) and not is_cloud_lite()
             if needs_refresh and not mlb_is_refreshing(team_id, games):
-                asyncio.create_task(refresh_matchup(team_id, games))
+                _schedule(refresh_matchup(team_id, games))
                 return _wrap_mlb_matchup(team_id, cached, refreshing=True)
             return _wrap_mlb_matchup(team_id, cached, refreshing=False)
 
-        if not mlb_is_refreshing(team_id, games):
-            asyncio.create_task(refresh_matchup(team_id, games))
+        if not is_cloud_lite() and not mlb_is_refreshing(team_id, games):
+            _schedule(refresh_matchup(team_id, games))
         return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -313,22 +326,25 @@ async def api_npb_matchup(
     try:
         cached = get_npb_matchup(team_id, games)
 
-        if force:
+        if force and not is_cloud_lite():
             if not npb_is_refreshing(team_id, games):
-                asyncio.create_task(refresh_npb_matchup(team_id, games))
+                _schedule(refresh_npb_matchup(team_id, games))
             if cached:
                 return await _wrap_npb_matchup(team_id, cached, refreshing=True)
             return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
 
+        if force and cached:
+            return await _wrap_npb_matchup(team_id, cached, refreshing=False)
+
         if cached:
-            needs_refresh = npb_is_stale(cached["updatedAt"])
+            needs_refresh = npb_is_stale(cached["updatedAt"]) and not is_cloud_lite()
             if needs_refresh and not npb_is_refreshing(team_id, games):
-                asyncio.create_task(refresh_npb_matchup(team_id, games))
+                _schedule(refresh_npb_matchup(team_id, games))
                 return await _wrap_npb_matchup(team_id, cached, refreshing=True)
             return await _wrap_npb_matchup(team_id, cached, refreshing=False)
 
-        if not npb_is_refreshing(team_id, games):
-            asyncio.create_task(refresh_npb_matchup(team_id, games))
+        if not is_cloud_lite() and not npb_is_refreshing(team_id, games):
+            _schedule(refresh_npb_matchup(team_id, games))
         return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -362,22 +378,25 @@ async def api_cpbl_matchup(
     try:
         cached = get_cpbl_matchup(team_id, games)
 
-        if force:
+        if force and not is_cloud_lite():
             if not cpbl_is_refreshing(team_id, games):
-                asyncio.create_task(refresh_cpbl_matchup(team_id, games))
+                _schedule(refresh_cpbl_matchup(team_id, games))
             if cached:
                 return _wrap_cpbl_matchup(team_id, cached, refreshing=True)
             return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
 
+        if force and cached:
+            return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
+
         if cached:
-            needs_refresh = cpbl_is_stale(cached["updatedAt"]) or cpbl_cache_needs_upgrade(cached)
+            needs_refresh = (cpbl_is_stale(cached["updatedAt"]) or cpbl_cache_needs_upgrade(cached)) and not is_cloud_lite()
             if needs_refresh and not cpbl_is_refreshing(team_id, games):
-                asyncio.create_task(refresh_cpbl_matchup(team_id, games))
+                _schedule(refresh_cpbl_matchup(team_id, games))
                 return _wrap_cpbl_matchup(team_id, cached, refreshing=True)
             return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
 
-        if not cpbl_is_refreshing(team_id, games):
-            asyncio.create_task(refresh_cpbl_matchup(team_id, games))
+        if not is_cloud_lite() and not cpbl_is_refreshing(team_id, games):
+            _schedule(refresh_cpbl_matchup(team_id, games))
         return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

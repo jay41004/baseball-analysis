@@ -158,7 +158,10 @@ async def start_npb_cache_services(*, skip_load: bool = False) -> None:
     if not skip_load:
         load_from_disk()
     logger.info(
-        "NPB cache loaded (%s teams on disk). Starting background warm-up.",
+        "NPB cache loaded (%s teams on disk).",
         cached_team_count(DEFAULT_GAMES),
     )
-    asyncio.create_task(hourly_refresh_loop())
+    from app.cloud_lite import is_cloud_lite
+
+    if not is_cloud_lite():
+        asyncio.create_task(hourly_refresh_loop())
