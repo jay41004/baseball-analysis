@@ -5,8 +5,8 @@ const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
 const EXPECTED_CACHE_VERSION = 13;
 
-const FETCH_TIMEOUT_MS = 45000;
-const MAX_POLL_ATTEMPTS = 15;
+const FETCH_TIMEOUT_MS = 90000;
+const MAX_POLL_ATTEMPTS = 60;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
 let pollTimer = null;

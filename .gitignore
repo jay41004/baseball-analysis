@@ -9,6 +9,8 @@ probe_*
 verify_*
 *.json
 !data/.gitkeep
+!data/cache.json
+!data/npb_cache.json
 !data/cpbl_cache.json
 !data/cpbl_schedule.json
 !data/cpbl_season_batting_*.json
