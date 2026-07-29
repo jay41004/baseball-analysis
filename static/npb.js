@@ -431,9 +431,12 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 }
 
 async function loadTeams() {
-  const resp = await fetch("/api/npb/teams");
+  const { resp, data: teams } = await ApiUtils.fetchJson("/api/npb/teams", fetchWithTimeout, {
+    onWaiting(n, total) {
+      cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
+    },
+  });
   if (!resp.ok) throw new Error("無法載入球隊列表");
-  const teams = await resp.json();
 
   teamSelect.innerHTML = teams
     .map((team) => {
@@ -536,8 +539,11 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     const query = new URLSearchParams({ team_id: teamId, games: String(games) });
     if (force) query.set("force", "true");
 
-    const resp = await fetchWithTimeout(`/api/npb/matchup?${query}`);
-    const data = await resp.json();
+    const { resp, data } = await ApiUtils.fetchJson(`/api/npb/matchup?${query}`, fetchWithTimeout, {
+      onWaiting(n, total) {
+        cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
+      },
+    });
     if (token !== fetchToken) return;
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
@@ -590,6 +596,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       showError("連線逾時，請按「立即更新」重試。");
     } else if (err.message === "Failed to fetch" || err.name === "TypeError") {
       showError("無法連線，請稍後再試或重新整理頁面。");
+    } else if (err.message.includes("啟動中") || err.message.includes("WAKE")) {
+      showError("雲端伺服器啟動中，請等 30 秒後按「立即更新」。");
     } else {
       showError(err.message || "發生未知錯誤");
     }

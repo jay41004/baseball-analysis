@@ -163,7 +163,9 @@ async def lifespan(app: FastAPI):
         logger = logging.getLogger(__name__)
         try:
             await asyncio.to_thread(load_mlb_disk)
+            await asyncio.sleep(1)
             await asyncio.to_thread(load_npb_disk)
+            await asyncio.sleep(1)
             await asyncio.to_thread(load_cpbl_disk)
             await start_cache_services(skip_load=True)
             await start_npb_cache_services(skip_load=True)
@@ -216,19 +218,27 @@ async def api_meta():
 
 @app.get("/api/warmup")
 async def api_warmup():
-    """Keep server awake and refresh all team caches in the background."""
-    if not mlb_is_warming_all():
-        asyncio.create_task(refresh_all_mlb_matchups(DEFAULT_GAMES))
-    if not npb_is_warming_all():
-        asyncio.create_task(refresh_all_npb_matchups(DEFAULT_GAMES))
-    if not cpbl_is_warming_all():
-        asyncio.create_task(refresh_all_cpbl_matchups(DEFAULT_GAMES))
+    """Lightweight keepalive — do not rebuild all caches on every ping."""
+    mlb_cached = mlb_cached_team_count(DEFAULT_GAMES)
+    npb_cached = npb_cached_team_count(DEFAULT_GAMES)
+    cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
+    ready = mlb_cached >= 30 and npb_cached >= 12 and cpbl_cached >= 6
+
+    if not ready:
+        if mlb_cached < 30 and not mlb_is_warming_all():
+            asyncio.create_task(refresh_all_mlb_matchups(DEFAULT_GAMES))
+        if npb_cached < 12 and not npb_is_warming_all():
+            asyncio.create_task(refresh_all_npb_matchups(DEFAULT_GAMES))
+        if cpbl_cached < 6 and not cpbl_is_warming_all():
+            asyncio.create_task(refresh_all_cpbl_matchups(DEFAULT_GAMES))
+
     return {
-        "status": "warming",
-        "mlbTeamsCached": mlb_cached_team_count(DEFAULT_GAMES),
-        "npbTeamsCached": npb_cached_team_count(DEFAULT_GAMES),
-        "cpblTeamsCached": cpbl_cached_team_count(DEFAULT_GAMES),
-        "warming": True,
+        "status": "ready" if ready else "warming",
+        "mlbTeamsCached": mlb_cached,
+        "npbTeamsCached": npb_cached,
+        "cpblTeamsCached": cpbl_cached,
+        "cacheReady": ready,
+        "warming": not ready,
     }
 
 

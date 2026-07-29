@@ -50,7 +50,9 @@ window.LineupLoader = (function () {
       try {
         const qs = new URLSearchParams({ team_id: teamId, games: String(games) });
         const resp = await fetchWithTimeout(`${apiPath}/lineup?${qs}`, LINEUP_FETCH_TIMEOUT_MS);
-        const lineups = await resp.json();
+        const lineups = window.ApiUtils
+          ? await ApiUtils.readJson(resp)
+          : await resp.json();
         if (resp.ok && lineupsReady(lineups)) {
           lastGoodLineups = lineups;
           syncLineup(lineups);

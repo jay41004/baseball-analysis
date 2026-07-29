@@ -176,7 +176,7 @@ async def refresh_all_matchups(games: int = DEFAULT_GAMES) -> None:
 
 async def hourly_refresh_loop() -> None:
     is_cloud = bool(os.environ.get("RENDER"))
-    startup_delay = int(os.environ.get("WARMUP_START_DELAY", "300" if not is_cloud else "0"))
+    startup_delay = int(os.environ.get("WARMUP_START_DELAY", "600" if is_cloud else "300"))
     if startup_delay > 0:
         await asyncio.sleep(startup_delay)
 

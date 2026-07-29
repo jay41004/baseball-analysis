@@ -62,4 +62,4 @@ services:
 
     buildCommand: pip install httpx
 
-    startCommand: python -c "import httpx; r=httpx.get('https://baseball-analysis.onrender.com/api/warmup', timeout=120); print(r.status_code)"
+    startCommand: python -c "import httpx; r=httpx.get('https://baseball-analysis.onrender.com/health', timeout=120); print(r.status_code)"

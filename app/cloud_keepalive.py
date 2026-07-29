@@ -29,12 +29,7 @@ async def cloud_keepalive_loop() -> None:
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 health = await client.get(f"{base_url}/health")
-                warmup = await client.get(f"{base_url}/api/warmup")
-                logger.info(
-                    "Keepalive ping health=%s warmup=%s",
-                    health.status_code,
-                    warmup.status_code,
-                )
+                logger.info("Keepalive ping health=%s", health.status_code)
         except Exception:
             logger.exception("Keepalive ping failed")
 
