@@ -8,11 +8,16 @@ from typing import Any
 
 import httpx
 
-from app.inning_comparison import build_inning_comparison
+from app.inning_comparison import (
+    build_inning_comparison,
+    build_matchup_situational,
+    strip_panel_internals,
+)
 from app.team_names import team_name_zh
 
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
 UPCOMING_GAME_STATES = {"Preview", "Live", "Scheduled", "Warmup"}
+_MLB_FETCH_SEM = asyncio.Semaphore(16)
 
 
 def mlb_schedule_start() -> date:
@@ -42,21 +47,29 @@ async def fetch_teams() -> list[dict[str, Any]]:
     )
 
 
-async def fetch_recent_final_games(team_id: int, count: int = 10) -> list[dict[str, Any]]:
+async def fetch_recent_final_games(
+    team_id: int,
+    count: int = 10,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict[str, Any]]:
     end = date.today()
     start = end - timedelta(days=120)
+    params = {
+        "sportId": 1,
+        "teamId": team_id,
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "gameType": "R",
+    }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.get(
-            f"{MLB_BASE}/schedule",
-            params={
-                "sportId": 1,
-                "teamId": team_id,
-                "startDate": start.isoformat(),
-                "endDate": end.isoformat(),
-                "gameType": "R",
-            },
-        )
+    if client is None:
+        async with httpx.AsyncClient(timeout=30.0) as owned:
+            resp = await owned.get(f"{MLB_BASE}/schedule", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    else:
+        resp = await client.get(f"{MLB_BASE}/schedule", params=params)
         resp.raise_for_status()
         data = resp.json()
 
@@ -102,15 +115,21 @@ def first_five_runs_allowed(linescore: dict[str, Any], team_is_home: bool) -> in
 
 
 async def fetch_linescore(client: httpx.AsyncClient, game_pk: int) -> dict[str, Any]:
-    resp = await client.get(f"{MLB_BASE}/game/{game_pk}/linescore")
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(f"{MLB_BASE}/game/{game_pk}/linescore")
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def fetch_game_boxscore(client: httpx.AsyncClient, game_pk: int) -> dict[str, Any]:
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(f"{MLB_BASE}/game/{game_pk}/boxscore")
     resp.raise_for_status()
     return resp.json()
 
 
 async def fetch_game_starters(client: httpx.AsyncClient, game_pk: int) -> dict[str, str | None]:
-    resp = await client.get(f"{MLB_BASE}/game/{game_pk}/boxscore")
-    resp.raise_for_status()
-    box = resp.json()
+    box = await fetch_game_boxscore(client, game_pk)
 
     starters: dict[str, str | None] = {"away": None, "home": None}
     for side in ("away", "home"):
@@ -128,6 +147,276 @@ def opponent_starter(starters: dict[str, str | None], team_side: str) -> str | N
     return starters.get(opponent_side)
 
 
+def _scores_from_linescore(linescore: dict[str, Any], is_home: bool) -> tuple[int | None, int | None]:
+    teams = linescore.get("teams") or {}
+    away_runs = teams.get("away", {}).get("runs")
+    home_runs = teams.get("home", {}).get("runs")
+    if away_runs is None or home_runs is None:
+        return None, None
+    if is_home:
+        return home_runs, away_runs
+    return away_runs, home_runs
+
+
+def _parse_batters_from_team_box(team_data: dict[str, Any]) -> list[dict[str, Any]]:
+    batting_order = team_data.get("battingOrder") or []
+    players = team_data.get("players") or {}
+    batters: list[dict[str, Any]] = []
+    for order, player_id in enumerate(batting_order, start=1):
+        player = players.get(f"ID{player_id}", {})
+        person = player.get("person", {})
+        season = player.get("seasonStats", {}).get("batting", {})
+        at_bats = season.get("atBats")
+        hits = season.get("hits")
+        entry: dict[str, Any] = {
+            "order": order,
+            "id": person.get("id"),
+            "name": person.get("fullName"),
+            "position": player.get("position", {}).get("abbreviation", ""),
+            "avg": season.get("avg"),
+            "atBats": at_bats,
+            "hits": hits,
+            "obp": season.get("obp"),
+            "slg": season.get("slg"),
+            "ops": season.get("ops"),
+            "homeRuns": season.get("homeRuns"),
+            "rbi": season.get("rbi"),
+            "runs": season.get("runs"),
+        }
+        if at_bats is not None and hits is not None:
+            entry["abHits"] = f"{int(at_bats)}-{int(hits)}"
+        batters.append(entry)
+    return batters
+
+
+def _format_batting_avg(hits: int, at_bats: int) -> str | None:
+    if at_bats <= 0:
+        return None
+    return f"{hits / at_bats:.3f}"[1:]
+
+
+def _recent_batting_form(splits: list[dict[str, Any]]) -> dict[str, Any]:
+    recent3 = splits[:3]
+    recent5 = splits[:5]
+
+    def totals(games: list[dict[str, Any]]) -> tuple[int, int, int]:
+        hits = 0
+        at_bats = 0
+        hit_games = 0
+        for split in games:
+            stat = split.get("stat", {})
+            game_hits = stat.get("hits") or 0
+            game_ab = stat.get("atBats") or 0
+            hits += game_hits
+            at_bats += game_ab
+            if game_hits > 0:
+                hit_games += 1
+        return hit_games, hits, at_bats
+
+    hit_games_3, hits_3, ab_3 = totals(recent3)
+    _, hits_5, ab_5 = totals(recent5)
+
+    return {
+        "recent3HitGames": hit_games_3,
+        "recent3Games": len(recent3),
+        "recent3Avg": _format_batting_avg(hits_3, ab_3),
+        "recent5Avg": _format_batting_avg(hits_5, ab_5),
+    }
+
+
+async def fetch_batter_hitting_game_log(
+    client: httpx.AsyncClient, player_id: int, *, season: int | None = None
+) -> list[dict[str, Any]]:
+    season = season or date.today().year
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(
+            f"{MLB_BASE}/people/{player_id}/stats",
+            params={"stats": "gameLog", "group": "hitting", "season": season},
+        )
+    resp.raise_for_status()
+    stats = resp.json().get("stats", [])
+    if not stats:
+        return []
+    splits = stats[0].get("splits", [])
+    splits.sort(key=lambda split: split.get("date", ""), reverse=True)
+    return splits
+
+
+async def enrich_batters_recent_form(
+    client: httpx.AsyncClient, batters: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    player_ids = [batter["id"] for batter in batters if batter.get("id")]
+    if not player_ids:
+        return batters
+
+    logs = await asyncio.gather(
+        *[fetch_batter_hitting_game_log(client, player_id) for player_id in player_ids]
+    )
+    form_by_id = {
+        player_id: _recent_batting_form(log)
+        for player_id, log in zip(player_ids, logs)
+    }
+    for batter in batters:
+        player_id = batter.get("id")
+        if player_id in form_by_id:
+            batter.update(form_by_id[player_id])
+    return batters
+
+
+async def _fetch_previous_starting_lineup(
+    client: httpx.AsyncClient, team_id: int
+) -> tuple[list[dict[str, Any]], str | None]:
+    games = await fetch_recent_final_games(team_id, 1, client=client)
+    if not games:
+        return [], None
+    game = games[0]
+    side = _team_side(game, team_id)
+    box = await fetch_game_boxscore(client, game["gamePk"])
+    batters = _parse_batters_from_team_box(box["teams"][side])
+    return batters, game.get("officialDate")
+
+
+async def fetch_batter_risp_avg(
+    client: httpx.AsyncClient, batter_id: int, *, season: int | None = None
+) -> str | None:
+    season = season or date.today().year
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(
+            f"{MLB_BASE}/people/{batter_id}/stats",
+            params={
+                "stats": "statSplits",
+                "group": "hitting",
+                "season": season,
+                "sitCodes": "risp",
+            },
+        )
+    if resp.status_code != 200:
+        return None
+    stats = resp.json().get("stats") or []
+    if not stats:
+        return None
+    splits = stats[0].get("splits") or []
+    if not splits:
+        return None
+    avg = splits[0].get("stat", {}).get("avg")
+    if avg is None:
+        return None
+    try:
+        text = f"{float(avg):.3f}"
+    except (TypeError, ValueError):
+        return None
+    return text[1:] if text.startswith("0.") else text
+
+
+async def enrich_batters_risp(
+    client: httpx.AsyncClient, batters: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    player_ids = [batter["id"] for batter in batters if batter.get("id")]
+    if not player_ids:
+        return batters
+    risp_values = await asyncio.gather(
+        *[fetch_batter_risp_avg(client, int(player_id)) for player_id in player_ids]
+    )
+    enriched: list[dict[str, Any]] = []
+    for batter, risp_avg in zip(batters, risp_values):
+        copy = dict(batter)
+        if risp_avg:
+            copy["rispAvg"] = risp_avg
+        enriched.append(copy)
+    return enriched
+
+
+async def fetch_batter_vs_pitcher_stats(
+    client: httpx.AsyncClient,
+    batter_id: int,
+    pitcher_id: int,
+    *,
+    season: int | None = None,
+) -> dict[str, str | None]:
+    season = season or date.today().year
+    result = {"vsPitcherSeasonAvg": None, "vsPitcherCareerAvg": None}
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(
+            f"{MLB_BASE}/people/{batter_id}/stats",
+            params={
+                "stats": "vsPitcher",
+                "group": "hitting",
+                "pitchingOpponent": pitcher_id,
+                "season": season,
+            },
+        )
+    if resp.status_code != 200:
+        return result
+    stats = resp.json().get("stats") or []
+    if not stats:
+        return result
+    splits = stats[0].get("splits") or []
+    if not splits:
+        return result
+    stat = splits[0].get("stat") or {}
+    avg = stat.get("avg")
+    if avg is not None:
+        text = f"{float(avg):.3f}"
+        result["vsPitcherSeasonAvg"] = text[1:] if text.startswith("0.") else text
+        result["vsPitcherCareerAvg"] = result["vsPitcherSeasonAvg"]
+    return result
+
+
+async def enrich_batters_vs_pitcher(
+    client: httpx.AsyncClient,
+    batters: list[dict[str, Any]],
+    pitcher_id: int | None,
+) -> list[dict[str, Any]]:
+    if not pitcher_id:
+        return batters
+    enriched: list[dict[str, Any]] = []
+    for batter in batters:
+        copy = dict(batter)
+        batter_id = copy.get("id")
+        if batter_id:
+            copy.update(await fetch_batter_vs_pitcher_stats(client, int(batter_id), int(pitcher_id)))
+        at_bats = copy.get("atBats")
+        hits = copy.get("hits")
+        if at_bats is not None and hits is not None:
+            copy["abHits"] = f"{int(at_bats)}-{int(hits)}"
+        enriched.append(copy)
+    return enriched
+
+
+async def fetch_matchup_starting_lineups(
+    client: httpx.AsyncClient, matchup: dict[str, Any]
+) -> dict[str, Any]:
+    game_pk = matchup["gamePk"]
+    feed = await fetch_game_feed(client, game_pk)
+    box_teams = feed.get("liveData", {}).get("boxscore", {}).get("teams", {})
+
+    lineups: dict[str, Any] = {}
+    for side_key in ("away", "home"):
+        side_info = matchup[side_key]
+        team_id = side_info["teamId"]
+        batters = _parse_batters_from_team_box(box_teams.get(side_key, {}))
+        source = "confirmed"
+        source_date = matchup.get("date")
+        if not batters:
+            batters, source_date = await _fetch_previous_starting_lineup(client, team_id)
+            source = "previous"
+        opposing_key = "home" if side_key == "away" else "away"
+        opposing_pitcher = matchup.get(opposing_key, {}).get("probablePitcher")
+        pitcher_id = (opposing_pitcher or {}).get("id")
+        if batters:
+            batters = await enrich_batters_recent_form(client, batters)
+            batters = await enrich_batters_vs_pitcher(client, batters, pitcher_id)
+            batters = await enrich_batters_risp(client, batters)
+        lineups[side_key] = {
+            "teamName": side_info["teamName"],
+            "source": source,
+            "sourceDate": source_date,
+            "opposingPitcher": opposing_pitcher,
+            "batters": batters,
+        }
+    return lineups
+
+
 def first_inning_runs(linescore: dict[str, Any], side: str) -> int:
     for inning in linescore.get("innings", []):
         if inning.get("num") == 1:
@@ -142,7 +431,8 @@ def first_inning_runs_allowed(linescore: dict[str, Any], team_is_home: bool) -> 
 
 
 async def fetch_game_feed(client: httpx.AsyncClient, game_pk: int) -> dict[str, Any]:
-    resp = await client.get(f"{MLB_BASE}.1/game/{game_pk}/feed/live")
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(f"{MLB_BASE}.1/game/{game_pk}/feed/live")
     resp.raise_for_status()
     return resp.json()
 
@@ -407,10 +697,11 @@ async def fetch_pitcher_starts(
     client: httpx.AsyncClient, pitcher_id: int, count: int, season: int | None = None
 ) -> list[dict[str, Any]]:
     season = season or date.today().year
-    resp = await client.get(
-        f"{MLB_BASE}/people/{pitcher_id}/stats",
-        params={"stats": "gameLog", "group": "pitching", "season": season},
-    )
+    async with _MLB_FETCH_SEM:
+        resp = await client.get(
+            f"{MLB_BASE}/people/{pitcher_id}/stats",
+            params={"stats": "gameLog", "group": "pitching", "season": season},
+        )
     resp.raise_for_status()
     stats = resp.json().get("stats", [])
     if not stats:
@@ -426,9 +717,14 @@ async def fetch_pitcher_starts(
 
 
 async def analyze_pitcher_first_five_starts(
-    client: httpx.AsyncClient, pitcher_id: int, pitcher_name: str, count: int = 10
+    client: httpx.AsyncClient,
+    pitcher_id: int,
+    pitcher_name: str,
+    count: int = 10,
+    *,
+    fetch_limit: int = 40,
 ) -> dict[str, Any]:
-    starts = await fetch_pitcher_starts(client, pitcher_id, count)
+    starts = await fetch_pitcher_starts(client, pitcher_id, fetch_limit)
     if not starts:
         empty_summary = summarize_pitcher_summary([], [])
         return {
@@ -438,17 +734,31 @@ async def analyze_pitcher_first_five_starts(
             "summary": empty_summary,
         }
 
-    game_pks = [split["game"]["gamePk"] for split in starts]
+    display_starts = starts[:count]
+    away_starts = [split for split in starts if not split.get("isHome")][:10]
+    home_starts = [split for split in starts if split.get("isHome")][:10]
+
+    needed_splits: list[dict[str, Any]] = []
+    seen_pks: set[int] = set()
+    for split in display_starts + away_starts + home_starts:
+        game_pk = split["game"]["gamePk"]
+        if game_pk in seen_pks:
+            continue
+        seen_pks.add(game_pk)
+        needed_splits.append(split)
+
+    game_pks = [split["game"]["gamePk"] for split in needed_splits]
     linescores, starters_list, feeds = await asyncio.gather(
         asyncio.gather(*[fetch_linescore(client, pk) for pk in game_pks]),
         asyncio.gather(*[fetch_game_starters(client, pk) for pk in game_pks]),
         asyncio.gather(*[fetch_game_feed(client, pk) for pk in game_pks]),
     )
 
-    rows: list[dict[str, Any]] = []
-    for split, linescore, starters, feed in zip(starts, linescores, starters_list, feeds):
+    row_by_pk: dict[int, dict[str, Any]] = {}
+    for split, linescore, starters, feed in zip(needed_splits, linescores, starters_list, feeds):
         is_home = split.get("isHome", False)
         runs_allowed = first_five_runs_allowed(linescore, is_home)
+        team_score, opponent_score = _scores_from_linescore(linescore, is_home)
         stat = split.get("stat", {})
         innings_pitched = stat.get("inningsPitched")
         earned_runs = stat.get("earnedRuns")
@@ -467,89 +777,148 @@ async def analyze_pitcher_first_five_starts(
         scored_innings = scored_innings_from_runs(runs_by_inning)
         opponent_info = split.get("opponent", {})
         team_side = "home" if split.get("isHome") else "away"
-        rows.append(
-            {
-                "date": split.get("date"),
-                "gamePk": split["game"]["gamePk"],
-                "opponent": team_name_zh(
-                    team_id=opponent_info.get("id"),
-                    english_name=opponent_info.get("name", "Unknown"),
-                ),
-                "opponentStarter": opponent_starter(starters, team_side),
-                "isHome": split.get("isHome", False),
-                "firstFiveRunsAllowed": runs_allowed,
-                "firstInningRunsAllowed": first_inning_runs,
-                "firstInningScored": first_inning_runs > 0,
-                "runsByInning": runs_by_inning,
-                "scoredInnings": scored_innings,
-                "over15": runs_allowed > 1.5,
-                "over25": runs_allowed > 2.5,
-                "inningsPitched": innings_pitched,
-                "earnedRuns": earned_runs,
-                "result": split.get("isWin"),
-            }
-        )
+        row_by_pk[split["game"]["gamePk"]] = {
+            "date": split.get("date"),
+            "gamePk": split["game"]["gamePk"],
+            "opponent": team_name_zh(
+                team_id=opponent_info.get("id"),
+                english_name=opponent_info.get("name", "Unknown"),
+            ),
+            "opponentStarter": opponent_starter(starters, team_side),
+            "isHome": split.get("isHome", False),
+            "teamScore": team_score,
+            "opponentScore": opponent_score,
+            "firstFiveRunsAllowed": runs_allowed,
+            "firstInningRunsAllowed": first_inning_runs,
+            "firstInningScored": first_inning_runs > 0,
+            "runsByInning": runs_by_inning,
+            "scoredInnings": scored_innings,
+            "over15": runs_allowed > 1.5,
+            "over25": runs_allowed > 2.5,
+            "inningsPitched": innings_pitched,
+            "earnedRuns": earned_runs,
+            "result": split.get("isWin"),
+        }
 
-    runs_list = [r["firstFiveRunsAllowed"] for r in rows]
+    rows = [row_by_pk[split["game"]["gamePk"]] for split in needed_splits]
+    display_rows = [
+        row_by_pk[split["game"]["gamePk"]]
+        for split in display_starts
+        if split["game"]["gamePk"] in row_by_pk
+    ]
+    runs_list = [row["firstFiveRunsAllowed"] for row in display_rows]
     return {
         "pitcherId": pitcher_id,
         "pitcherName": pitcher_name,
-        "games": rows,
-        "summary": summarize_pitcher_summary(rows, runs_list),
+        "games": display_rows,
+        "_startPool": rows,
+        "summary": summarize_pitcher_summary(display_rows, runs_list),
     }
 
 
 async def analyze_team_scoring(
     client: httpx.AsyncClient, team_id: int, game_count: int = 10
 ) -> dict[str, Any]:
-    games = await fetch_recent_final_games(team_id, game_count)
-    if not games:
+    pool = await fetch_recent_final_games(team_id, 50, client=client)
+    if not pool:
         return {
             "teamId": team_id,
             "teamName": team_name_zh(team_id=team_id),
             "games": [],
+            "_scoredPool": [],
             "summary": summarize_team_scoring([], []),
         }
 
-    game_pks = [game["gamePk"] for game in games]
-    linescores, starters_list = await asyncio.gather(
-        asyncio.gather(*[fetch_linescore(client, pk) for pk in game_pks]),
-        asyncio.gather(*[fetch_game_starters(client, pk) for pk in game_pks]),
-    )
+    panel_games = pool[:game_count]
+    away_targets = [game for game in pool if _team_side(game, team_id) == "away"][:10]
+    home_targets = [game for game in pool if _team_side(game, team_id) == "home"][:10]
 
-    rows: list[dict[str, Any]] = []
-    for game, linescore, starters in zip(games, linescores, starters_list):
+    needed_pks: list[int] = []
+    seen_pks: set[int] = set()
+    for game in panel_games + away_targets + home_targets:
+        game_pk = game.get("gamePk")
+        if game_pk in seen_pks:
+            continue
+        seen_pks.add(game_pk)
+        needed_pks.append(game_pk)
+
+    linescores, starters_list = await asyncio.gather(
+        asyncio.gather(*[fetch_linescore(client, pk) for pk in needed_pks]),
+        asyncio.gather(*[fetch_game_starters(client, pk) for pk in [g["gamePk"] for g in panel_games]]),
+    )
+    linescore_by_pk = dict(zip(needed_pks, linescores))
+
+    def scored_innings_for(game: dict[str, Any]) -> list[int]:
+        side = _team_side(game, team_id)
+        linescore = linescore_by_pk[game["gamePk"]]
+        scored: list[int] = []
+        for inning in range(1, 10):
+            runs = 0
+            for inn in linescore.get("innings", []):
+                if inn.get("num") == inning:
+                    runs = inn.get(side, {}).get("runs", 0) or 0
+                    break
+            if runs > 0:
+                scored.append(inning)
+        return scored
+
+    def build_row(
+        game: dict[str, Any],
+        *,
+        starters: dict[str, Any] | None = None,
+        include_scored: bool = False,
+    ) -> dict[str, Any]:
         side = _team_side(game, team_id)
         opponent_info = game["teams"]["home" if side == "away" else "away"]["team"]
         is_home = side == "home"
+        linescore = linescore_by_pk[game["gamePk"]]
         runs = first_five_runs(linescore, side)
         inning_one_runs = first_inning_runs(linescore, side)
+        team_score = game["teams"][side].get("score")
+        opponent_score = game["teams"]["away" if side == "home" else "home"].get("score")
+        row = {
+            "date": game.get("officialDate"),
+            "gamePk": game.get("gamePk"),
+            "opponent": team_name_zh(
+                team_id=opponent_info.get("id"),
+                english_name=opponent_info.get("name"),
+            ),
+            "opponentStarter": opponent_starter(starters, side) if starters else None,
+            "teamStarter": starters.get(side) if starters else None,
+            "isHome": is_home,
+            "teamScore": team_score,
+            "opponentScore": opponent_score,
+            "firstInningRuns": inning_one_runs,
+            "firstInningScored": inning_one_runs > 0,
+            "firstFiveRuns": runs,
+            "over15": runs > 1.5,
+            "over25": runs > 2.5,
+            "result": game["teams"][side].get("isWinner"),
+        }
+        if include_scored:
+            row["scoredInnings"] = scored_innings_for(game)
+        return row
 
-        rows.append(
-            {
-                "date": game.get("officialDate"),
-                "gamePk": game.get("gamePk"),
-                "opponent": team_name_zh(
-                    team_id=opponent_info.get("id"),
-                    english_name=opponent_info.get("name"),
-                ),
-                "opponentStarter": opponent_starter(starters, side),
-                "teamStarter": starters.get(side),
-                "isHome": is_home,
-                "firstInningRuns": inning_one_runs,
-                "firstInningScored": inning_one_runs > 0,
-                "firstFiveRuns": runs,
-                "over15": runs > 1.5,
-                "over25": runs > 2.5,
-                "result": game["teams"][side].get("isWinner"),
-            }
-        )
+    scored_pool: list[dict[str, Any]] = []
+    pool_seen: set[int] = set()
+    for game in away_targets + home_targets:
+        game_pk = game.get("gamePk")
+        if game_pk in pool_seen:
+            continue
+        pool_seen.add(game_pk)
+        scored_pool.append(build_row(game, include_scored=True))
+
+    rows = [
+        build_row(game, starters=starters)
+        for game, starters in zip(panel_games, starters_list)
+    ]
 
     runs_list = [r["firstFiveRuns"] for r in rows]
     return {
         "teamId": team_id,
         "teamName": team_name_zh(team_id=team_id),
         "games": rows,
+        "_scoredPool": scored_pool,
         "summary": summarize_team_scoring(rows, runs_list),
     }
 
@@ -557,7 +926,7 @@ async def analyze_team_scoring(
 async def fetch_inning_comparison(
     client: httpx.AsyncClient, team_id: int, *, game_count: int = 20
 ) -> dict[str, Any]:
-    games = await fetch_recent_final_games(team_id, game_count)
+    games = await fetch_recent_final_games(team_id, game_count, client=client)
     rows: list[dict[str, Any]] = []
     if games:
         linescores = await asyncio.gather(
@@ -602,7 +971,10 @@ async def fetch_inning_comparison(
 
 
 async def analyze_matchup_a_table(focus_team_id: int) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        limits=httpx.Limits(max_connections=24, max_keepalive_connections=12),
+    ) as client:
         matchup = await fetch_next_matchup(client, focus_team_id)
         if not matchup:
             raise ValueError("找不到下一場比賽")
@@ -621,7 +993,7 @@ async def _build_side_panel(
     probable = side_info.get("probablePitcher")
     if probable:
         pitcher_analysis = await analyze_pitcher_first_five_starts(
-            client, probable["id"], probable["fullName"], game_count
+            client, probable["id"], probable["fullName"], game_count, fetch_limit=40
         )
 
     return {
@@ -632,15 +1004,26 @@ async def _build_side_panel(
 
 
 async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        limits=httpx.Limits(max_connections=24, max_keepalive_connections=12),
+    ) as client:
         matchup = await fetch_next_matchup(client, focus_team_id)
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
-        away_panel, home_panel = await asyncio.gather(
+        away_id = matchup["away"]["teamId"]
+        home_id = matchup["home"]["teamId"]
+        away_panel, home_panel, away_table, home_table, starting_lineups = await asyncio.gather(
             _build_side_panel(client, matchup["away"], game_count),
             _build_side_panel(client, matchup["home"], game_count),
+            fetch_inning_comparison(client, away_id),
+            fetch_inning_comparison(client, home_id),
+            fetch_matchup_starting_lineups(client, matchup),
         )
+        situational = build_matchup_situational(away_panel, home_panel)
+        away_panel = strip_panel_internals(away_panel)
+        home_panel = strip_panel_internals(home_panel)
 
     return {
         "focusTeamId": focus_team_id,
@@ -652,11 +1035,14 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
         },
         "away": away_panel,
         "home": home_panel,
+        "aTable": {"away": away_table, "home": home_table},
+        "startingLineups": starting_lineups,
+        "situational": situational,
     }
 
 
 async def analyze_team_first_five(team_id: int, game_count: int = 10) -> dict[str, Any]:
-    games = await fetch_recent_final_games(team_id, game_count)
+    games = await fetch_recent_final_games(team_id, game_count, client=client)
     rows: list[dict[str, Any]] = []
 
     async with httpx.AsyncClient(timeout=30.0) as client:

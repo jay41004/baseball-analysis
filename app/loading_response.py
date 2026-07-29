@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.inning_comparison import empty_inning_comparison
+from app.inning_comparison import empty_situational
 
 
 def _empty_summary() -> dict[str, Any]:
@@ -40,10 +40,7 @@ def loading_matchup_payload(team_id: int, *, cache_version: int) -> dict[str, An
         },
         "away": _loading_side(),
         "home": _loading_side(),
-        "aTable": {
-            "away": empty_inning_comparison(),
-            "home": empty_inning_comparison(),
-        },
+        "situational": empty_situational(),
         "loading": True,
         "refreshing": True,
         "cacheVersion": cache_version,

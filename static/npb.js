@@ -3,7 +3,7 @@ const STORAGE_KEY = "npb_last_team";
 const REFRESH_MS = 60 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
-const EXPECTED_CACHE_VERSION = 14;
+const EXPECTED_CACHE_VERSION = 18;
 
 const FETCH_TIMEOUT_MS = 45000;
 const MAX_POLL_ATTEMPTS = 15;
@@ -265,6 +265,22 @@ function formatOpponent(game) {
   return `${prefix} ${game.opponent}${starter}`;
 }
 
+function formatFinalScore(game) {
+  if (game.teamScore == null || game.opponentScore == null) {
+    return '<span class="muted-text">—</span>';
+  }
+  const awayScore = game.isHome ? game.opponentScore : game.teamScore;
+  const homeScore = game.isHome ? game.teamScore : game.opponentScore;
+  if (game.isHome) {
+    return `<span class="game-score"><span class="score-neutral">${awayScore}</span><span class="score-sep">-</span><span class="score-team">${homeScore}</span></span>`;
+  }
+  return `<span class="game-score"><span class="score-team">${awayScore}</span><span class="score-sep">-</span><span class="score-neutral">${homeScore}</span></span>`;
+}
+
+function formatMatchCell(game) {
+  return `<span class="match-date">${game.date.slice(5)}</span><span class="match-opp">${formatOpponent(game)}</span>`;
+}
+
 function teamGamesTable(games) {
   if (!games.length) return `<p class="empty-note">尚無數據</p>`;
   return `
@@ -272,8 +288,8 @@ function teamGamesTable(games) {
       <table class="data-table">
         <thead>
           <tr>
-            <th class="col-date">日期</th>
-            <th class="col-opp">對手</th>
+            <th class="col-match">日期 / 對手</th>
+            <th class="col-score">比分</th>
             <th class="col-num">1局得分</th>
             <th class="col-num">1–5 得分</th>
             <th class="col-ou">1.5</th>
@@ -285,8 +301,8 @@ function teamGamesTable(games) {
             .map(
               (game) => `
             <tr>
-              <td class="col-date">${game.date.slice(5)}</td>
-              <td class="col-opp">${formatOpponent(game)}</td>
+              <td class="col-match">${formatMatchCell(game)}</td>
+              <td class="col-score">${formatFinalScore(game)}</td>
               <td class="col-num">${teamFirstInningBadge(game.firstInningScored)}</td>
               <td class="col-num runs">${game.firstFiveRuns}</td>
               <td class="col-ou">${ouBadge(game.over15)}</td>
@@ -308,10 +324,10 @@ function pitcherGamesTable(games) {
       <table class="data-table">
         <thead>
           <tr>
-            <th class="col-date">日期</th>
-            <th class="col-opp">對手</th>
+            <th class="col-match">日期 / 對手</th>
+            <th class="col-score">比分</th>
             <th class="col-num">掉分局數</th>
-            <th class="col-num">1局失分</th>
+            <th class="col-num">1局掉分</th>
             <th class="col-num">1–5 失分</th>
             <th class="col-ou">1.5</th>
             <th class="col-ou">2.5</th>
@@ -322,10 +338,10 @@ function pitcherGamesTable(games) {
             .map(
               (game) => `
             <tr>
-              <td class="col-date">${game.date.slice(5)}</td>
-              <td class="col-opp">${formatOpponent(game)}</td>
+              <td class="col-match">${formatMatchCell(game)}</td>
+              <td class="col-score">${formatFinalScore(game)}</td>
               <td class="col-num">${formatScoredInnings(game)}</td>
-              <td class="col-num">${inningScoredBadge(game.firstInningScored)} <span class="runs">${game.firstInningRunsAllowed}</span></td>
+              <td class="col-num">${inningScoredBadge(game.firstInningScored)}</td>
               <td class="col-num runs">${game.firstFiveRunsAllowed}</td>
               <td class="col-ou">${ouBadge(game.over15)}</td>
               <td class="col-ou">${ouBadge(game.over25)}</td>
@@ -408,10 +424,7 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
     ${renderSideColumn(home, "主隊")}
   `;
 
-  const aTableRoot = document.getElementById("a-table-root");
-  if (aTableRoot) {
-    showATableFromMatchup(data.aTable);
-  }
+  renderSituationalSection(data.situational);
 
   restoreTableScroll(tableScroll);
   return true;
@@ -459,12 +472,12 @@ function clearHourlyTimer() {
   }
 }
 
-function fetchWithTimeout(url) {
+function fetchWithTimeout(url, timeoutMs = FETCH_TIMEOUT_MS) {
   if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) {
-    return fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    return fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
@@ -476,9 +489,20 @@ function schedulePoll(slow = false) {
   );
 }
 
+function teamGamesMissingScores(data) {
+  for (const side of ["away", "home"]) {
+    for (const game of data[side]?.games ?? []) {
+      if (game.teamScore == null || game.opponentScore == null) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function needsFreshData(data, games) {
   if (isDataReady(data)) {
-    return false;
+    return teamGamesMissingScores(data);
   }
   return !data.cacheVersion || data.cacheVersion < expectedCacheVersion;
 }
@@ -498,6 +522,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
   if (!isPoll) {
     pollAttempts = 0;
     clearPollTimer();
+    cancelATableLoad();
+    LineupLoader.clearDisplayedLineups();
     if (!hasDisplayedData) {
       setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
     } else {
@@ -524,10 +550,16 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
 
     renderMatchup(data, { skipIfUnchanged: isPoll });
     hasDisplayedData = true;
-    if (!aTableReady(data.aTable)) {
-      loadATable("/api/npb", teamId, { fetchWithTimeout });
-    }
     ready = isDataReady(data);
+    if (ready) {
+      LineupLoader.ensureLineups(data.startingLineups, {
+        apiPath: "/api/npb",
+        teamId,
+        games,
+        fetchWithTimeout,
+      });
+      syncATable("/api/npb", teamId, data.aTable, { force, matchReady: true });
+    }
 
     if (!ready) {
       pollAttempts += 1;

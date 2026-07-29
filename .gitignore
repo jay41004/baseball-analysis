@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+data/cache.json
+data/npb_cache.json
+probe_*
+verify_*
+*.json
+!data/.gitkeep

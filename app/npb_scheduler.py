@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from typing import Any
 
 from app.npb_cache import (
     CACHE_VERSION,
     DEFAULT_GAMES,
     cached_team_count,
+    get_a_table,
     get_matchup,
     is_stale,
     load_from_disk,
@@ -17,6 +19,7 @@ from app.npb_cache import (
     store_a_table,
 )
 from app.npb_service import analyze_matchup, analyze_matchup_a_table, fetch_npb_teams
+from app.npb_service import NpbClient, fetch_matchup_starting_lineups, fetch_next_matchup
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ def is_refreshing(team_id: int, games: int = DEFAULT_GAMES) -> bool:
 
 
 _refreshing_a_table: set[int] = set()
+_a_table_done: dict[int, asyncio.Event] = {}
 
 
 def is_refreshing_a_table(team_id: int) -> bool:
@@ -41,7 +45,13 @@ def is_refreshing_a_table(team_id: int) -> bool:
 
 async def refresh_a_table(team_id: int) -> None:
     if team_id in _refreshing_a_table:
+        waiter = _a_table_done.get(team_id)
+        if waiter is not None:
+            await waiter.wait()
         return
+
+    done = asyncio.Event()
+    _a_table_done[team_id] = done
     _refreshing_a_table.add(team_id)
     try:
         data = await analyze_matchup_a_table(team_id)
@@ -51,6 +61,19 @@ async def refresh_a_table(team_id: int) -> None:
         logger.exception("Failed to refresh NPB a-table for team %s", team_id)
     finally:
         _refreshing_a_table.discard(team_id)
+        done.set()
+        _a_table_done.pop(team_id, None)
+
+
+async def ensure_a_table(team_id: int, *, force: bool = False) -> dict[str, Any]:
+    cached = get_a_table(team_id)
+    if cached and not (force and is_stale(cached["updatedAt"])):
+        return cached
+    await refresh_a_table(team_id)
+    cached = get_a_table(team_id)
+    if not cached:
+        raise ValueError(f"無法產生 NPB a 表格（team {team_id}）")
+    return cached
 
 
 async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
@@ -61,8 +84,18 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
     _refreshing_keys.add(key)
     try:
         data = await analyze_matchup(team_id, games)
+        client = NpbClient()
+        try:
+            matchup = await fetch_next_matchup(client, team_id)
+            if matchup:
+                data["startingLineups"] = await fetch_matchup_starting_lineups(client, matchup)
+        except Exception:
+            logger.exception("Failed to fetch NPB lineups during refresh for team %s", team_id)
+        finally:
+            await client.close()
         await store_matchup(team_id, games, data)
-        asyncio.create_task(refresh_a_table(team_id))
+        if a_table := data.get("aTable"):
+            await store_a_table(team_id, a_table)
         logger.info("Refreshed NPB matchup cache for team %s (%s games)", team_id, games)
     except Exception:
         logger.exception("Failed to refresh NPB matchup for team %s", team_id)
@@ -108,7 +141,7 @@ async def refresh_all_matchups(games: int = DEFAULT_GAMES) -> None:
 
 async def hourly_refresh_loop() -> None:
     is_cloud = bool(os.environ.get("RENDER"))
-    startup_delay = int(os.environ.get("WARMUP_START_DELAY", "0" if is_cloud else "120"))
+    startup_delay = int(os.environ.get("WARMUP_START_DELAY", "300" if not is_cloud else "0"))
     if startup_delay > 0:
         await asyncio.sleep(startup_delay)
 

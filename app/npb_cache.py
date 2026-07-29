@@ -9,11 +9,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from app.inning_comparison import a_table_payload_complete
 from app.npb_display import localize_matchup_payload
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 14
+CACHE_VERSION = 18
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "npb_cache.json"
@@ -30,8 +31,11 @@ def _matchup_key(team_id: int, games: int) -> str:
     return f"npb:matchup:v{CACHE_VERSION}:{team_id}:{games}"
 
 
+ATABLE_REVISION = 2
+
+
 def _a_table_key(team_id: int) -> str:
-    return f"npb:atable:v{CACHE_VERSION}:{team_id}"
+    return f"npb:atable:v{CACHE_VERSION}:r{ATABLE_REVISION}:{team_id}"
 
 
 def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
@@ -50,7 +54,13 @@ def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
 
 
 def get_a_table(team_id: int) -> dict[str, Any] | None:
-    return _store.get(_a_table_key(team_id))
+    entry = _store.get(_a_table_key(team_id))
+    if not entry:
+        return None
+    data = entry.get("data")
+    if not data or not a_table_payload_complete(data):
+        return None
+    return entry
 
 
 async def store_a_table(team_id: int, data: dict[str, Any]) -> dict[str, Any]:
