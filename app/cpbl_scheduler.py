@@ -203,7 +203,12 @@ async def warm_schedule_pool() -> None:
 
 
 async def bootstrap_cpbl_cache() -> None:
-    await warm_schedule_pool()
+    from app.cpbl_service import SCHEDULE_CACHE_FILE
+
+    if SCHEDULE_CACHE_FILE.exists():
+        logger.info("CPBL schedule on disk; skipping network warm")
+    else:
+        await warm_schedule_pool()
     schedule_season_batting_refresh()
     schedule_vs_pitcher_refresh()
     schedule_risp_refresh()
@@ -211,12 +216,14 @@ async def bootstrap_cpbl_cache() -> None:
 
 
 async def _deferred_refresh_all() -> None:
-    await asyncio.sleep(45)
+    delay = int(os.environ.get("CPBL_DEFERRED_REFRESH_SECONDS", "45"))
+    await asyncio.sleep(delay)
     await refresh_all_matchups(DEFAULT_GAMES)
 
 
-async def start_cpbl_cache_services() -> None:
-    load_from_disk()
+async def start_cpbl_cache_services(*, skip_load: bool = False) -> None:
+    if not skip_load:
+        load_from_disk()
     logger.info(
         "CPBL cache loaded (%s teams on disk). Starting background warm-up.",
         cached_team_count(DEFAULT_GAMES),

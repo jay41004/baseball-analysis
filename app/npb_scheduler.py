@@ -154,8 +154,9 @@ def is_warming_all() -> bool:
     return _warming_all
 
 
-async def start_npb_cache_services() -> None:
-    load_from_disk()
+async def start_npb_cache_services(*, skip_load: bool = False) -> None:
+    if not skip_load:
+        load_from_disk()
     logger.info(
         "NPB cache loaded (%s teams on disk). Starting background warm-up.",
         cached_team_count(DEFAULT_GAMES),

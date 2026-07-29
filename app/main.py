@@ -152,15 +152,35 @@ async def lifespan(app: FastAPI):
     from app.team_names import localize_analysis as _check_localize
 
     _ = _check_localize  # fail fast at startup if cache imports break
-    await start_cache_services()
-    await start_npb_cache_services()
-    await start_cpbl_cache_services()
+
+    async def _boot_cache_services() -> None:
+        import logging
+
+        from app.cache import load_from_disk as load_mlb_disk
+        from app.cpbl_cache import load_from_disk as load_cpbl_disk
+        from app.npb_cache import load_from_disk as load_npb_disk
+
+        logger = logging.getLogger(__name__)
+        try:
+            await asyncio.to_thread(load_mlb_disk)
+            await asyncio.to_thread(load_npb_disk)
+            await asyncio.to_thread(load_cpbl_disk)
+            await start_cache_services(skip_load=True)
+            await start_npb_cache_services(skip_load=True)
+            await start_cpbl_cache_services(skip_load=True)
+            logger.info("Background cache boot complete")
+        except Exception:
+            logger.exception("Background cache boot failed")
+
+    boot_task = asyncio.create_task(_boot_cache_services())
     keepalive_task = asyncio.create_task(cloud_keepalive_loop())
     try:
         yield
     finally:
+        boot_task.cancel()
         keepalive_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
+            await boot_task
             await keepalive_task
 
 
