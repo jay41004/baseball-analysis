@@ -81,8 +81,9 @@ function showError(message) {
 
 function updateCacheStatus(data) {
   let text = SiteConfig.isStatic
-    ? `靜態快照：${formatTime(data.cachedAt)}（不會自動更新，請開雲端站）`
+    ? `靜態快照：${formatTime(data.cachedAt)}（不會自動更新）`
     : `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
+  if (SiteConfig.useLiveApi) text += " · 連線雲端";
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
   if (!SiteConfig.isStatic && data.cacheVersion && data.cacheVersion < expectedCacheVersion) {
     text += " · 請按「立即更新」或 Ctrl+F5";
@@ -560,12 +561,12 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     ready = isDataReady(data);
     if (ready) {
       LineupLoader.ensureLineups(data.startingLineups, {
-        apiPath: "/api/cpbl",
+        apiPath: SiteConfig.api("/api/cpbl"),
         teamId,
         games,
         fetchWithTimeout,
       });
-      syncATable("/api/cpbl", teamId, data.aTable, { force, matchReady: true });
+      syncATable(SiteConfig.api("/api/cpbl"), teamId, data.aTable, { force, matchReady: true });
     }
 
     if (!ready) {
@@ -617,7 +618,7 @@ function scheduleHourlyRefresh() {
 
 async function loadMeta() {
   try {
-    const resp = await fetch("/api/meta");
+    const resp = await fetch(SiteConfig.meta());
     if (resp.ok) {
       const meta = await resp.json();
       if (meta.cpblCacheVersion) expectedCacheVersion = meta.cpblCacheVersion;
