@@ -1003,29 +1003,71 @@ async def _build_side_panel(
     }
 
 
-async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str, Any]:
-    async with httpx.AsyncClient(
-        timeout=60.0,
-        limits=httpx.Limits(max_connections=24, max_keepalive_connections=12),
-    ) as client:
+async def analyze_matchup(
+    focus_team_id: int, game_count: int = 10, *, lite: bool = False
+) -> dict[str, Any]:
+    limits = (
+        httpx.Limits(max_connections=8, max_keepalive_connections=4)
+        if lite
+        else httpx.Limits(max_connections=24, max_keepalive_connections=12)
+    )
+    async with httpx.AsyncClient(timeout=60.0, limits=limits) as client:
         matchup = await fetch_next_matchup(client, focus_team_id)
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
+        # playsport fallback for probable pitchers when statsapi returns None
+        needs_away = not matchup["away"].get("probablePitcher")
+        needs_home = not matchup["home"].get("probablePitcher")
+        if needs_away or needs_home:
+            try:
+                from app.playsport_starters import fetch_playsport_starters
+                ps_games = await fetch_playsport_starters(client)
+                away_name = (matchup["away"].get("teamName") or "").lower()
+                home_name = (matchup["home"].get("teamName") or "").lower()
+                for pg in ps_games:
+                    if pg.get("league") != "mlb":
+                        continue
+                    if (
+                        pg.get("awayTeam", "").lower() in away_name
+                        or away_name in pg.get("awayTeam", "").lower()
+                    ) and (
+                        pg.get("homeTeam", "").lower() in home_name
+                        or home_name in pg.get("homeTeam", "").lower()
+                    ):
+                        if needs_away and pg.get("awayStarter"):
+                            matchup["away"]["probablePitcher"] = {
+                                "id": None, "fullName": pg["awayStarter"]
+                            }
+                        if needs_home and pg.get("homeStarter"):
+                            matchup["home"]["probablePitcher"] = {
+                                "id": None, "fullName": pg["homeStarter"]
+                            }
+                        break
+            except Exception:
+                pass
+
         away_id = matchup["away"]["teamId"]
         home_id = matchup["home"]["teamId"]
-        away_panel, home_panel, away_table, home_table, starting_lineups = await asyncio.gather(
-            _build_side_panel(client, matchup["away"], game_count),
-            _build_side_panel(client, matchup["home"], game_count),
-            fetch_inning_comparison(client, away_id),
-            fetch_inning_comparison(client, home_id),
-            fetch_matchup_starting_lineups(client, matchup),
-        )
+        if lite:
+            # Render free tier: sequential panels, skip heavy a-table rebuild.
+            away_panel = await _build_side_panel(client, matchup["away"], game_count)
+            home_panel = await _build_side_panel(client, matchup["home"], game_count)
+            starting_lineups = await fetch_matchup_starting_lineups(client, matchup)
+            away_table = home_table = None
+        else:
+            away_panel, home_panel, away_table, home_table, starting_lineups = await asyncio.gather(
+                _build_side_panel(client, matchup["away"], game_count),
+                _build_side_panel(client, matchup["home"], game_count),
+                fetch_inning_comparison(client, away_id),
+                fetch_inning_comparison(client, home_id),
+                fetch_matchup_starting_lineups(client, matchup),
+            )
         situational = build_matchup_situational(away_panel, home_panel)
         away_panel = strip_panel_internals(away_panel)
         home_panel = strip_panel_internals(home_panel)
 
-    return {
+    result = {
         "focusTeamId": focus_team_id,
         "matchup": {
             "date": matchup["date"],
@@ -1035,10 +1077,12 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
         },
         "away": away_panel,
         "home": home_panel,
-        "aTable": {"away": away_table, "home": home_table},
         "startingLineups": starting_lineups,
         "situational": situational,
     }
+    if away_table is not None and home_table is not None:
+        result["aTable"] = {"away": away_table, "home": home_table}
+    return result
 
 
 async def analyze_team_first_five(team_id: int, game_count: int = 10) -> dict[str, Any]:

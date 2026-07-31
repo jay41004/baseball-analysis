@@ -293,16 +293,15 @@ async def api_matchup(
         cached = get_matchup(team_id, games)
         needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
 
-        if needs_refresh:
-            # Await so Render CLOUD_LITE / free tier actually returns fresh data
-            # (background tasks were previously no-op or died with the request).
-            await refresh_matchup(team_id, games)
-            cached = get_matchup(team_id, games)
-            if cached:
-                return _wrap_mlb_matchup(team_id, cached, refreshing=False)
-            return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
+        if needs_refresh and not mlb_is_refreshing(team_id, games):
+            # Background only — awaiting full MLB rebuild OOMs Render free tier.
+            _schedule(refresh_matchup(team_id, games))
 
-        return _wrap_mlb_matchup(team_id, cached, refreshing=False)
+        if cached:
+            return _wrap_mlb_matchup(
+                team_id, cached, refreshing=needs_refresh or mlb_is_refreshing(team_id, games)
+            )
+        return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -319,14 +318,14 @@ async def api_npb_matchup(
         cached = get_npb_matchup(team_id, games)
         needs_refresh = force or cached is None or npb_is_stale(cached["updatedAt"])
 
-        if needs_refresh:
-            await refresh_npb_matchup(team_id, games)
-            cached = get_npb_matchup(team_id, games)
-            if cached:
-                return await _wrap_npb_matchup(team_id, cached, refreshing=False)
-            return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
+        if needs_refresh and not npb_is_refreshing(team_id, games):
+            _schedule(refresh_npb_matchup(team_id, games))
 
-        return await _wrap_npb_matchup(team_id, cached, refreshing=False)
+        if cached:
+            return await _wrap_npb_matchup(
+                team_id, cached, refreshing=needs_refresh or npb_is_refreshing(team_id, games)
+            )
+        return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -365,14 +364,14 @@ async def api_cpbl_matchup(
             or cpbl_cache_needs_upgrade(cached)
         )
 
-        if needs_refresh:
-            await refresh_cpbl_matchup(team_id, games)
-            cached = get_cpbl_matchup(team_id, games)
-            if cached:
-                return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
-            return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
+        if needs_refresh and not cpbl_is_refreshing(team_id, games):
+            _schedule(refresh_cpbl_matchup(team_id, games))
 
-        return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
+        if cached:
+            return _wrap_cpbl_matchup(
+                team_id, cached, refreshing=needs_refresh or cpbl_is_refreshing(team_id, games)
+            )
+        return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

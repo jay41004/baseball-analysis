@@ -82,7 +82,9 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
 
     _refreshing_keys.add(key)
     try:
-        data = await analyze_matchup(team_id, games)
+        from app.cloud_lite import is_cloud_lite
+
+        data = await analyze_matchup(team_id, games, lite=is_cloud_lite())
         await store_matchup(team_id, games, data)
         if a_table := data.get("aTable"):
             await store_a_table(team_id, a_table)
