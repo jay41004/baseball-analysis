@@ -213,7 +213,17 @@ async def lifespan(app: FastAPI):
         try:
             # Let /health succeed before heavy disk IO on free tier.
             if is_cloud_lite():
-                await asyncio.sleep(3)
+                await asyncio.sleep(2)
+                await asyncio.to_thread(load_mlb_disk)
+                await asyncio.sleep(0.5)
+                await asyncio.to_thread(load_npb_disk)
+                await asyncio.sleep(0.5)
+                await asyncio.to_thread(load_cpbl_disk)
+                await start_cache_services(skip_load=True)
+                await start_npb_cache_services(skip_load=True)
+                await start_cpbl_cache_services(skip_load=True)
+                logger.info("CLOUD_LITE boot complete")
+                return
             await asyncio.to_thread(load_mlb_disk)
             await asyncio.sleep(1)
             await asyncio.to_thread(load_npb_disk)
@@ -270,6 +280,8 @@ async def api_meta():
     npb_cached = npb_cached_team_count(DEFAULT_GAMES)
     cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
     return {
+        "deployMark": "2026-08-01-cloud-header-v3",
+        "cloudLite": is_cloud_lite(),
         "mlbCacheVersion": MLB_CACHE_VERSION,
         "npbCacheVersion": NPB_CACHE_VERSION,
         "cpblCacheVersion": CPBL_CACHE_VERSION,
@@ -389,14 +401,19 @@ async def api_npb_matchup(
         cached = get_npb_matchup(team_id, games)
         needs_refresh = force or cached is None or npb_is_stale(cached["updatedAt"])
 
-        refreshing = False
-        if needs_refresh and not npb_is_refreshing(team_id, games):
-            started = await _schedule_matchup_refresh(
-                lambda: refresh_npb_matchup(team_id, games), force=force
-            )
-            refreshing = started or npb_is_refreshing(team_id, games)
+        if needs_refresh:
+            # Cloud free tier: never background-refresh NPB (OOM risk).
+            if is_cloud_lite():
+                refreshing = False
+            elif not npb_is_refreshing(team_id, games):
+                started = await _schedule_matchup_refresh(
+                    lambda: refresh_npb_matchup(team_id, games), force=force
+                )
+                refreshing = started or npb_is_refreshing(team_id, games)
+            else:
+                refreshing = npb_is_refreshing(team_id, games)
         else:
-            refreshing = npb_is_refreshing(team_id, games)
+            refreshing = False
 
         if cached:
             return await _wrap_npb_matchup(team_id, cached, refreshing=refreshing)
@@ -440,13 +457,16 @@ async def api_cpbl_matchup(
         )
 
         refreshing = False
-        if needs_refresh and not cpbl_is_refreshing(team_id, games):
-            started = await _schedule_matchup_refresh(
-                lambda: refresh_cpbl_matchup(team_id, games), force=force
-            )
-            refreshing = started or cpbl_is_refreshing(team_id, games)
-        else:
-            refreshing = cpbl_is_refreshing(team_id, games)
+        if needs_refresh:
+            if is_cloud_lite():
+                refreshing = False
+            elif not cpbl_is_refreshing(team_id, games):
+                started = await _schedule_matchup_refresh(
+                    lambda: refresh_cpbl_matchup(team_id, games), force=force
+                )
+                refreshing = started or cpbl_is_refreshing(team_id, games)
+            else:
+                refreshing = cpbl_is_refreshing(team_id, games)
 
         if cached:
             return _wrap_cpbl_matchup(team_id, cached, refreshing=refreshing)
