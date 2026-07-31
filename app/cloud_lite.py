@@ -1,7 +1,9 @@
-"""Optional cloud read-only mode (disable warm-all / keepalive storms).
+"""Cloud lite mode: keep Render free tier from OOM crash loops.
 
-Set CLOUD_LITE=1 to enable. CLOUD_LITE=0 (or unset) keeps on-demand refresh working.
-RENDER alone no longer forces read-only — that previously blocked all updates on free tier.
+Priority:
+1. CLOUD_LITE=0/false → full mode
+2. CLOUD_LITE=1/true → lite mode
+3. Else if RENDER is set → lite mode (default for free tier)
 """
 
 from __future__ import annotations
@@ -15,4 +17,4 @@ def is_cloud_lite() -> bool:
         return False
     if flag in {"1", "true", "yes", "on"}:
         return True
-    return False
+    return bool(os.environ.get("RENDER"))

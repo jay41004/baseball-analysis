@@ -280,8 +280,10 @@ async def api_meta():
     npb_cached = npb_cached_team_count(DEFAULT_GAMES)
     cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
     return {
-        "deployMark": "2026-08-01-cloud-header-v3",
+        "deployMark": "2026-08-01-cloud-header-v4",
         "cloudLite": is_cloud_lite(),
+        "renderEnv": bool(__import__("os").environ.get("RENDER")),
+        "cloudLiteEnv": __import__("os").environ.get("CLOUD_LITE", ""),
         "mlbCacheVersion": MLB_CACHE_VERSION,
         "npbCacheVersion": NPB_CACHE_VERSION,
         "cpblCacheVersion": CPBL_CACHE_VERSION,
