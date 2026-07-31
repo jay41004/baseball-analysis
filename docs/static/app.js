@@ -451,7 +451,11 @@ async function loadTeams() {
 
 function isDataReady(data) {
   if (data.loading) return false;
-  return (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
+  const hasGames = (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
+  if (hasGames) return true;
+  // Cloud header-only updates can return empty panels — do not poll forever.
+  if (data.refreshing) return false;
+  return Boolean(data.matchup?.date && data.away?.teamName && data.home?.teamName);
 }
 
 function setBusy(isBusy, message) {

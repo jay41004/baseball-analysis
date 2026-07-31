@@ -124,6 +124,7 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
             "under15": 0,
             "over25": 0,
             "under25": 0,
+            "avgRuns": 0,
             "avgFirstFive": 0,
             "firstInningScored": 0,
         }
