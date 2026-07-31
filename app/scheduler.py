@@ -75,6 +75,75 @@ async def ensure_a_table(team_id: int, *, force: bool = False) -> dict[str, Any]
     return cached
 
 
+async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> None:
+    """Cloud-safe refresh: update next-game header via one MLB schedule call."""
+    import copy
+
+    import httpx
+
+    from app.mlb_service import fetch_next_matchup
+
+    cached = get_matchup(team_id, games)
+    if not cached:
+        return
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        matchup = await fetch_next_matchup(client, team_id)
+    if not matchup:
+        return
+
+    data = copy.deepcopy(cached["data"])
+    old_away = int((data.get("away") or {}).get("teamId") or 0)
+    old_home = int((data.get("home") or {}).get("teamId") or 0)
+    new_away = int(matchup["away"]["teamId"])
+    new_home = int(matchup["home"]["teamId"])
+
+    data["matchup"] = {
+        "date": matchup.get("date"),
+        "gameDate": matchup.get("gameDate"),
+        "gamePk": matchup.get("gamePk"),
+        "status": matchup.get("status"),
+    }
+
+    if {old_away, old_home} == {new_away, new_home}:
+        if old_away == new_home and old_home == new_away:
+            data["away"], data["home"] = data["home"], data["away"]
+        for side in ("away", "home"):
+            panel = data.get(side) or {}
+            src = matchup[side]
+            panel["teamId"] = src["teamId"]
+            panel["teamName"] = src["teamName"]
+            if src.get("probablePitcher"):
+                panel["probablePitcher"] = src["probablePitcher"]
+            data[side] = panel
+    else:
+        # Opponents changed — keep site alive with correct header; drop stale panels.
+        empty_summary = {
+            "totalGames": 0,
+            "over15": 0,
+            "under15": 0,
+            "over25": 0,
+            "under25": 0,
+            "avgFirstFive": 0,
+            "firstInningScored": 0,
+        }
+        for side in ("away", "home"):
+            src = matchup[side]
+            data[side] = {
+                "teamId": src["teamId"],
+                "teamName": src["teamName"],
+                "probablePitcher": src.get("probablePitcher"),
+                "games": [],
+                "summary": dict(empty_summary),
+            }
+        data["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
+        data.pop("aTable", None)
+        data.pop("situational", None)
+
+    await store_matchup(team_id, games, data)
+    logger.info("Refreshed MLB matchup header for team %s", team_id)
+
+
 async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
     key = f"matchup:v{CACHE_VERSION}:{team_id}:{games}"
     if key in _refreshing_keys:
@@ -84,10 +153,14 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
     try:
         from app.cloud_lite import is_cloud_lite
 
-        data = await analyze_matchup(team_id, games, lite=is_cloud_lite())
-        await store_matchup(team_id, games, data)
-        if a_table := data.get("aTable"):
-            await store_a_table(team_id, a_table)
+        if is_cloud_lite():
+            # Free tier: never rebuild full panels in-process (OOM → 502).
+            await refresh_matchup_header(team_id, games)
+        else:
+            data = await analyze_matchup(team_id, games, lite=False)
+            await store_matchup(team_id, games, data)
+            if a_table := data.get("aTable"):
+                await store_a_table(team_id, a_table)
         logger.info("Refreshed matchup cache for team %s (%s games)", team_id, games)
     except Exception:
         logger.exception("Failed to refresh matchup for team %s", team_id)
