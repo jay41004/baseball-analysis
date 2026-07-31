@@ -347,19 +347,30 @@ async def api_matchup(
     force: bool = Query(False, description="Force refresh from MLB API"),
 ):
     try:
+        from app.scheduler import refresh_matchup_header
+
         cached = get_matchup(team_id, games)
         needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
 
-        refreshing = False
-        if needs_refresh and not mlb_is_refreshing(team_id, games):
-            started = await _schedule_matchup_refresh(
-                lambda: refresh_matchup(team_id, games), force=force
-            )
-            refreshing = started or mlb_is_refreshing(team_id, games)
-        else:
-            refreshing = mlb_is_refreshing(team_id, games)
+        if needs_refresh:
+            if is_cloud_lite():
+                # Sync header-only update — background full rebuild crashes free tier.
+                if cached is not None:
+                    await refresh_matchup_header(team_id, games)
+                    cached = get_matchup(team_id, games)
+                elif not mlb_is_refreshing(team_id, games):
+                    await _schedule_matchup_refresh(
+                        lambda: refresh_matchup(team_id, games), force=True
+                    )
+            elif not mlb_is_refreshing(team_id, games):
+                await _schedule_matchup_refresh(
+                    lambda: refresh_matchup(team_id, games), force=force
+                )
 
         if cached:
+            refreshing = (not is_cloud_lite()) and (
+                needs_refresh or mlb_is_refreshing(team_id, games)
+            )
             return _wrap_mlb_matchup(team_id, cached, refreshing=refreshing)
         return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
     except ValueError as exc:
