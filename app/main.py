@@ -98,6 +98,47 @@ def _schedule(coro) -> None:
     asyncio.create_task(coro)
 
 
+_cloud_refresh_slots = 0
+_CLOUD_REFRESH_MAX = 1
+
+
+def _can_start_cloud_refresh() -> bool:
+    """Render free tier OOMs if multiple matchup rebuilds overlap."""
+    global _cloud_refresh_slots
+    if not is_cloud_lite():
+        return True
+    if _cloud_refresh_slots >= _CLOUD_REFRESH_MAX:
+        return False
+    _cloud_refresh_slots += 1
+    return True
+
+
+def _finish_cloud_refresh() -> None:
+    global _cloud_refresh_slots
+    if _cloud_refresh_slots > 0:
+        _cloud_refresh_slots -= 1
+
+
+async def _schedule_matchup_refresh(factory, *, force: bool) -> bool:
+    """Schedule at most one cloud rebuild. factory() must return an awaitable."""
+    if not is_cloud_lite():
+        _schedule(factory())
+        return True
+
+    if _can_start_cloud_refresh():
+        async def _runner():
+            try:
+                await factory()
+            finally:
+                _finish_cloud_refresh()
+
+        _schedule(_runner())
+        return True
+
+    # Another refresh is running — caller should keep polling on force.
+    return False
+
+
 def _attach_a_table(
     payload: dict,
     team_id: int,
@@ -115,7 +156,7 @@ def _attach_a_table(
         merged["aTable"] = copy.deepcopy(entry["data"])
         return merged
 
-    if not is_refreshing_table(team_id):
+    if not is_refreshing_table(team_id) and not is_cloud_lite():
         _schedule(refresh_table(team_id))
     return payload
 
@@ -170,6 +211,9 @@ async def lifespan(app: FastAPI):
 
         logger = logging.getLogger(__name__)
         try:
+            # Let /health succeed before heavy disk IO on free tier.
+            if is_cloud_lite():
+                await asyncio.sleep(3)
             await asyncio.to_thread(load_mlb_disk)
             await asyncio.sleep(1)
             await asyncio.to_thread(load_npb_disk)
@@ -306,14 +350,17 @@ async def api_matchup(
         cached = get_matchup(team_id, games)
         needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
 
+        refreshing = False
         if needs_refresh and not mlb_is_refreshing(team_id, games):
-            # Background only — awaiting full MLB rebuild OOMs Render free tier.
-            _schedule(refresh_matchup(team_id, games))
+            started = await _schedule_matchup_refresh(
+                lambda: refresh_matchup(team_id, games), force=force
+            )
+            refreshing = started or mlb_is_refreshing(team_id, games)
+        else:
+            refreshing = mlb_is_refreshing(team_id, games)
 
         if cached:
-            return _wrap_mlb_matchup(
-                team_id, cached, refreshing=needs_refresh or mlb_is_refreshing(team_id, games)
-            )
+            return _wrap_mlb_matchup(team_id, cached, refreshing=refreshing)
         return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -331,13 +378,17 @@ async def api_npb_matchup(
         cached = get_npb_matchup(team_id, games)
         needs_refresh = force or cached is None or npb_is_stale(cached["updatedAt"])
 
+        refreshing = False
         if needs_refresh and not npb_is_refreshing(team_id, games):
-            _schedule(refresh_npb_matchup(team_id, games))
+            started = await _schedule_matchup_refresh(
+                lambda: refresh_npb_matchup(team_id, games), force=force
+            )
+            refreshing = started or npb_is_refreshing(team_id, games)
+        else:
+            refreshing = npb_is_refreshing(team_id, games)
 
         if cached:
-            return await _wrap_npb_matchup(
-                team_id, cached, refreshing=needs_refresh or npb_is_refreshing(team_id, games)
-            )
+            return await _wrap_npb_matchup(team_id, cached, refreshing=refreshing)
         return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -377,13 +428,17 @@ async def api_cpbl_matchup(
             or cpbl_cache_needs_upgrade(cached)
         )
 
+        refreshing = False
         if needs_refresh and not cpbl_is_refreshing(team_id, games):
-            _schedule(refresh_cpbl_matchup(team_id, games))
+            started = await _schedule_matchup_refresh(
+                lambda: refresh_cpbl_matchup(team_id, games), force=force
+            )
+            refreshing = started or cpbl_is_refreshing(team_id, games)
+        else:
+            refreshing = cpbl_is_refreshing(team_id, games)
 
         if cached:
-            return _wrap_cpbl_matchup(
-                team_id, cached, refreshing=needs_refresh or cpbl_is_refreshing(team_id, games)
-            )
+            return _wrap_cpbl_matchup(team_id, cached, refreshing=refreshing)
         return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
