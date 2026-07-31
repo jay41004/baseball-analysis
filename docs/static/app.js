@@ -128,7 +128,7 @@ function summaryCards(summary, totalLabel) {
       </article>
       <article class="stat-card highlight">
         <span class="stat-label">前五局平均得分</span>
-        <strong class="stat-value">${summary.avgRuns}</strong>
+        <strong class="stat-value">${summary.avgRuns ?? summary.avgFirstFive ?? 0}</strong>
         <span class="stat-sub">${totalLabel}</span>
       </article>
       <article class="stat-card highlight">
@@ -255,7 +255,7 @@ function pitcherSummaryCards(summary, games) {
       </article>
       <article class="stat-card highlight span-2">
         <span class="stat-label">前五局平均失分</span>
-        <strong class="stat-value">${summary.avgRuns}</strong>
+        <strong class="stat-value">${summary.avgRuns ?? summary.avgFirstFive ?? 0}</strong>
         <span class="stat-sub">近 ${summary.totalGames} 次先發</span>
       </article>
     </div>
