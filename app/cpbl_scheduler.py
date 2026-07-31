@@ -78,7 +78,7 @@ async def refresh_a_table(team_id: int) -> None:
 
 async def ensure_a_table(team_id: int, *, force: bool = False) -> dict[str, Any]:
     cached = get_a_table(team_id)
-    if cached and not (force and is_stale(cached["updatedAt"])):
+    if cached and not force:
         return cached
     await refresh_a_table(team_id)
     cached = get_a_table(team_id)
@@ -113,6 +113,10 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
 
     _refreshing_keys.add(key)
     try:
+        from app.cpbl_service import invalidate_shared_schedule_cache
+
+        # Drop schedule memo so probable pitchers / today's games re-enrich.
+        invalidate_shared_schedule_cache()
         data = await analyze_matchup(team_id, games)
         client = CpblClient()
         try:

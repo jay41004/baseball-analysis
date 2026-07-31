@@ -92,8 +92,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _schedule(coro) -> None:
-    if not is_cloud_lite():
-        asyncio.create_task(coro)
+    # Always schedule on-demand refresh (force / stale / cache miss).
+    # CLOUD_LITE only disables keepalive + full warm-all loops, not user refresh.
+    asyncio.create_task(coro)
 
 
 def _attach_a_table(
@@ -113,7 +114,7 @@ def _attach_a_table(
         merged["aTable"] = copy.deepcopy(entry["data"])
         return merged
 
-    if not is_refreshing_table(team_id) and not is_cloud_lite():
+    if not is_refreshing_table(team_id):
         _schedule(refresh_table(team_id))
     return payload
 
@@ -290,27 +291,18 @@ async def api_matchup(
 ):
     try:
         cached = get_matchup(team_id, games)
+        needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
 
-        if force and not is_cloud_lite():
-            if not mlb_is_refreshing(team_id, games):
-                _schedule(refresh_matchup(team_id, games))
+        if needs_refresh:
+            # Await so Render CLOUD_LITE / free tier actually returns fresh data
+            # (background tasks were previously no-op or died with the request).
+            await refresh_matchup(team_id, games)
+            cached = get_matchup(team_id, games)
             if cached:
-                return _wrap_mlb_matchup(team_id, cached, refreshing=True)
+                return _wrap_mlb_matchup(team_id, cached, refreshing=False)
             return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
 
-        if force and cached:
-            return _wrap_mlb_matchup(team_id, cached, refreshing=False)
-
-        if cached:
-            needs_refresh = is_stale(cached["updatedAt"]) and not is_cloud_lite()
-            if needs_refresh and not mlb_is_refreshing(team_id, games):
-                _schedule(refresh_matchup(team_id, games))
-                return _wrap_mlb_matchup(team_id, cached, refreshing=True)
-            return _wrap_mlb_matchup(team_id, cached, refreshing=False)
-
-        if not is_cloud_lite() and not mlb_is_refreshing(team_id, games):
-            _schedule(refresh_matchup(team_id, games))
-        return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
+        return _wrap_mlb_matchup(team_id, cached, refreshing=False)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -325,27 +317,16 @@ async def api_npb_matchup(
 ):
     try:
         cached = get_npb_matchup(team_id, games)
+        needs_refresh = force or cached is None or npb_is_stale(cached["updatedAt"])
 
-        if force and not is_cloud_lite():
-            if not npb_is_refreshing(team_id, games):
-                _schedule(refresh_npb_matchup(team_id, games))
+        if needs_refresh:
+            await refresh_npb_matchup(team_id, games)
+            cached = get_npb_matchup(team_id, games)
             if cached:
-                return await _wrap_npb_matchup(team_id, cached, refreshing=True)
+                return await _wrap_npb_matchup(team_id, cached, refreshing=False)
             return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
 
-        if force and cached:
-            return await _wrap_npb_matchup(team_id, cached, refreshing=False)
-
-        if cached:
-            needs_refresh = npb_is_stale(cached["updatedAt"]) and not is_cloud_lite()
-            if needs_refresh and not npb_is_refreshing(team_id, games):
-                _schedule(refresh_npb_matchup(team_id, games))
-                return await _wrap_npb_matchup(team_id, cached, refreshing=True)
-            return await _wrap_npb_matchup(team_id, cached, refreshing=False)
-
-        if not is_cloud_lite() and not npb_is_refreshing(team_id, games):
-            _schedule(refresh_npb_matchup(team_id, games))
-        return loading_matchup_payload(team_id, cache_version=NPB_CACHE_VERSION)
+        return await _wrap_npb_matchup(team_id, cached, refreshing=False)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -377,27 +358,21 @@ async def api_cpbl_matchup(
 ):
     try:
         cached = get_cpbl_matchup(team_id, games)
+        needs_refresh = (
+            force
+            or cached is None
+            or cpbl_is_stale(cached["updatedAt"])
+            or cpbl_cache_needs_upgrade(cached)
+        )
 
-        if force and not is_cloud_lite():
-            if not cpbl_is_refreshing(team_id, games):
-                _schedule(refresh_cpbl_matchup(team_id, games))
+        if needs_refresh:
+            await refresh_cpbl_matchup(team_id, games)
+            cached = get_cpbl_matchup(team_id, games)
             if cached:
-                return _wrap_cpbl_matchup(team_id, cached, refreshing=True)
+                return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
             return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
 
-        if force and cached:
-            return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
-
-        if cached:
-            needs_refresh = (cpbl_is_stale(cached["updatedAt"]) or cpbl_cache_needs_upgrade(cached)) and not is_cloud_lite()
-            if needs_refresh and not cpbl_is_refreshing(team_id, games):
-                _schedule(refresh_cpbl_matchup(team_id, games))
-                return _wrap_cpbl_matchup(team_id, cached, refreshing=True)
-            return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
-
-        if not is_cloud_lite() and not cpbl_is_refreshing(team_id, games):
-            _schedule(refresh_cpbl_matchup(team_id, games))
-        return loading_matchup_payload(team_id, cache_version=CPBL_CACHE_VERSION)
+        return _wrap_cpbl_matchup(team_id, cached, refreshing=False)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -413,7 +388,8 @@ async def api_cpbl_lineup(
     lineups = (cached.get("data") or {}).get("startingLineups") if cached else None
     away_count = len((lineups or {}).get("away", {}).get("batters") or [])
     home_count = len((lineups or {}).get("home", {}).get("batters") or [])
-    if away_count or home_count:
+    # Official firstSno is often incomplete (6–7 batters). Prefer a full 9-man card.
+    if away_count >= 9 and home_count >= 9:
         return lineups
 
     client = CpblClient()

@@ -24,7 +24,7 @@ services:
 
       - key: CLOUD_LITE
 
-        value: "1"
+        value: "0"
 
       - key: REFRESH_SECONDS
 

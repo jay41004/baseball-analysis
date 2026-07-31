@@ -1,6 +1,6 @@
 const DEFAULT_TEAM_ID = 1;
 const STORAGE_KEY = "npb_last_team";
-const REFRESH_MS = 60 * 60 * 1000;
+const REFRESH_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
 const EXPECTED_CACHE_VERSION = 18;
@@ -80,9 +80,11 @@ function showError(message) {
 }
 
 function updateCacheStatus(data) {
-  let text = `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
+  let text = SiteConfig.isStatic
+    ? `靜態快照：${formatTime(data.cachedAt)}（不會自動更新，請開雲端站）`
+    : `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
-  if (data.cacheVersion && data.cacheVersion < 12) {
+  if (!SiteConfig.isStatic && data.cacheVersion && data.cacheVersion < 12) {
     text += " · 請按「立即更新」或 Ctrl+F5";
   }
   if (data.refreshing) text += " · 背景更新中…";

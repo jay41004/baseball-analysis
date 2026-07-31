@@ -66,7 +66,7 @@ async def refresh_a_table(team_id: int) -> None:
 
 async def ensure_a_table(team_id: int, *, force: bool = False) -> dict[str, Any]:
     cached = get_a_table(team_id)
-    if cached and not (force and is_stale(cached["updatedAt"])):
+    if cached and not force:
         return cached
     await refresh_a_table(team_id)
     cached = get_a_table(team_id)
