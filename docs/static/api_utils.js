@@ -1,16 +1,15 @@
 /**
- * Same-origin Render server, or GitHub Pages front-end talking to live Render API.
+ * Local / Render = live API. GitHub Pages = static JSON (refreshed by Actions).
  */
 window.SiteConfig = (function () {
   const isGhPages = location.hostname.includes("github.io");
-  const LIVE_API = "https://baseball-analysis.onrender.com";
-  // GitHub Pages hosts HTML/JS only; data always comes from Render so it stays fresh.
-  const useLiveApi = isGhPages || window.SITE_LIVE === true;
-  const isStatic = !useLiveApi && window.SITE_STATIC === true;
+  // Static dump is the independent phone path — no Render free-tier dependency.
+  const isStatic = isGhPages || window.SITE_STATIC === true;
+  const useLiveApi = !isStatic && window.SITE_LIVE === true;
   const parts = location.pathname.split("/").filter(Boolean);
   const repo = isGhPages && parts.length ? parts[0] : "";
   const base = repo ? `/${repo}` : "";
-  const apiRoot = useLiveApi ? LIVE_API : "";
+  const apiRoot = "";
 
   function dataUrl(league, file) {
     return `${base}/data/${league}/${file}`;
@@ -88,8 +87,7 @@ window.ApiUtils = (function () {
   }
 
   async function fetchJson(url, fetchFn, options = {}) {
-    const remote = Boolean(SiteConfig.useLiveApi || SiteConfig.apiRoot);
-    const retries = SiteConfig.isStatic && !remote ? 2 : options.retries ?? 12;
+    const retries = SiteConfig.isStatic ? 2 : options.retries ?? 12;
     const retryMs = options.retryMs ?? 5000;
     const onWaiting = options.onWaiting;
 
@@ -113,7 +111,7 @@ window.ApiUtils = (function () {
       }
     }
     throw new Error(
-      SiteConfig.isStatic && !remote
+      SiteConfig.isStatic
         ? "資料載入失敗，請重新整理"
         : "雲端伺服器啟動中，請 30 秒後重新整理"
     );

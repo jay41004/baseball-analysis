@@ -13,7 +13,9 @@ function aTableReady(data) {
 }
 
 function renderATableBlock(side, roleLabel) {
-  const total5 = side.recent5.gameCount || 5;
+  const total5 = side.recent5.gameCount || 0;
+  const total10 = side.recent10.gameCount || 0;
+  const total20 = side.recent20.gameCount || 0;
 
   const rows = [1, 2, 3, 4, 5, 6, 7, 8, 9]
     .map((inning) => {
@@ -27,19 +29,25 @@ function renderATableBlock(side, roleLabel) {
         <tr>
           <td class="col-inning">${inning}</td>
           <td>${aTableCell(s5, total5)}</td>
-          <td>${aTableCell(s10, 10)}</td>
-          <td>${aTableCell(s20, 20)}</td>
+          <td>${aTableCell(s10, total10)}</td>
+          <td>${aTableCell(s20, total20)}</td>
           <td class="col-allowed-start">${aTableCell(a5, total5)}</td>
-          <td>${aTableCell(a10, 10)}</td>
-          <td>${aTableCell(a20, 20)}</td>
+          <td>${aTableCell(a10, total10)}</td>
+          <td>${aTableCell(a20, total20)}</td>
         </tr>
       `;
     })
     .join("");
 
+  const countNote =
+    total5 === 5 && total10 === 10 && total20 === 20
+      ? ""
+      : `<p class="a-table-note">實際場次：近5=${total5}、近10=${total10}、近20=${total20}</p>`;
+
   return `
     <article class="a-table-block">
       <h4 class="a-table-team">${roleLabel} · ${side.teamName}</h4>
+      ${countNote}
       <div class="table-wrap">
         <table class="data-table a-table">
           <thead>

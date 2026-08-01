@@ -1,0 +1,19 @@
+# 怎麼獨立使用（不用每次找 AI）
+
+## 手機／平板（推薦，電腦可關機）
+
+網址：https://jay41004.github.io/baseball-analysis/
+
+- 資料由 **GitHub Actions 每 4 小時自動重算並部署**
+- **不依賴 Render 免費版**，也不需要你的電腦開機
+- 要立刻刷新：GitHub → Actions →「Refresh data and deploy GitHub Pages」→ Run workflow
+
+## 本機預覽（完整數據、開發用）
+
+1. 雙擊專案裡的 `start.bat`
+2. 瀏覽器開 http://127.0.0.1:8000
+3.（可選）雙擊一次 `install_autostart.bat` → 之後開機自動在背景啟動
+
+## 不要再用的路
+
+Render 免費站只適合當備用；完整重抓容易記憶體不足（502），所以手機請用上面的 GitHub 站。

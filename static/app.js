@@ -81,9 +81,8 @@ function showError(message) {
 
 function updateCacheStatus(data) {
   let text = SiteConfig.isStatic
-    ? `靜態快照：${formatTime(data.cachedAt)}（不會自動更新）`
+    ? `靜態資料：${formatTime(data.cachedAt)}（GitHub 定時自動更新）`
     : `資料更新：${formatTime(data.cachedAt)} · 下次自動更新：${formatTime(data.nextRefreshAt)}`;
-  if (SiteConfig.useLiveApi) text += " · 連線雲端";
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
   if (data.refreshing) text += " · 背景更新中…";
   cacheStatusEl.textContent = text;

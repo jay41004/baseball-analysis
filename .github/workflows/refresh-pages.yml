@@ -1,0 +1,75 @@
+name: Refresh data and deploy GitHub Pages
+
+# Independent daily/hourly updates — does NOT use Render free tier.
+# GitHub Actions has enough RAM to rebuild full MLB/NPB/CPBL caches.
+
+on:
+  schedule:
+    # Every 4 hours (UTC). Taiwan ≈ UTC+8 → roughly 08/12/16/20/00/04 local.
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "static/**"
+      - "templates/**"
+      - "scripts/**"
+      - "requirements.txt"
+      - ".github/workflows/refresh-pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Refresh caches and build docs/
+        env:
+          CLOUD_LITE: "0"
+          REFRESH_CONCURRENCY: "2"
+          REFRESH_LEAGUES: "mlb,npb,cpbl"
+        run: python scripts/refresh_static_site.py
+
+      - name: Verify static site
+        run: |
+          test -f docs/index.html
+          test -f docs/data/mlb/teams.json
+          test -f docs/data/meta.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          meta = json.loads(Path("docs/data/meta.json").read_text(encoding="utf-8"))
+          print(meta)
+          assert meta.get("mlbTeamsCached", 0) >= 20, meta
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - uses: actions/deploy-pages@v4
+        id: deployment
