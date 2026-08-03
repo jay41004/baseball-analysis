@@ -8,13 +8,18 @@ on:
     # Every 2 hours (UTC). Taiwan ≈ UTC+8 → even hours local.
     - cron: "15 */2 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-pages.yml"
 
 permissions:
   contents: write
 
 concurrency:
   group: pages-refresh
-  cancel-in-progress: false
+  # Allow a new run to cancel a stuck/hung refresh so the site can recover.
+  cancel-in-progress: true
 
 jobs:
   refresh-and-deploy:
