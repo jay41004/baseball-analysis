@@ -110,10 +110,8 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
     """Cloud-safe: update next-game header without full panel rebuild."""
     from app.loading_response import loading_matchup_payload
     from app.pages_mirror import seed_matchup_from_pages
-    from app.cpbl_service import invalidate_shared_schedule_cache
 
-    invalidate_shared_schedule_cache(wipe_disk=False)
-
+    # Do NOT wipe shared schedule here — rebuilding the pool OOMs free tier.
     cached = get_matchup(team_id, games)
     if not cached:
         await seed_matchup_from_pages(
@@ -121,12 +119,12 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         )
         cached = get_matchup(team_id, games)
 
+    matchup = None
     client = CpblClient()
     try:
         matchup = await fetch_next_matchup(client, team_id)
     except Exception:
-        logger.exception("CPBL header fetch failed for team %s", team_id)
-        return
+        logger.exception("CPBL header fetch failed for team %s (keeping Pages/cache)", team_id)
     finally:
         await client.close()
     if not matchup:

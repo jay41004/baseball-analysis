@@ -288,7 +288,7 @@ async def api_meta():
     npb_cached = npb_cached_team_count(DEFAULT_GAMES)
     cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
     return {
-        "deployMark": "2026-08-03-dual-sync-v1",
+        "deployMark": "2026-08-03-dual-sync-v2",
         "cloudLite": is_cloud_lite(),
         "renderEnv": bool(__import__("os").environ.get("RENDER")),
         "cloudLiteEnv": __import__("os").environ.get("CLOUD_LITE", ""),
@@ -417,7 +417,12 @@ async def api_npb_matchup(
         if needs_refresh:
             if is_cloud_lite():
                 # Header-only (+ Pages seed) — full rebuild OOMs on free tier.
-                await refresh_npb_header(team_id, games)
+                try:
+                    await refresh_npb_header(team_id, games)
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception("NPB cloud header refresh failed")
                 cached = get_npb_matchup(team_id, games)
             elif not npb_is_refreshing(team_id, games):
                 started = await _schedule_matchup_refresh(
@@ -473,7 +478,12 @@ async def api_cpbl_matchup(
         refreshing = False
         if needs_refresh:
             if is_cloud_lite():
-                await refresh_cpbl_header(team_id, games)
+                try:
+                    await refresh_cpbl_header(team_id, games)
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception("CPBL cloud header refresh failed")
                 cached = get_cpbl_matchup(team_id, games)
             elif not cpbl_is_refreshing(team_id, games):
                 started = await _schedule_matchup_refresh(
