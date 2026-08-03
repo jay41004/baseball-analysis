@@ -107,11 +107,18 @@ async def refresh_matchup_lineups(team_id: int, games: int = DEFAULT_GAMES) -> N
 
 
 async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> None:
-    """Cloud-safe: update next-game header without full panel rebuild."""
+    """Cloud-safe: mirror GitHub Pages snapshot (no live CPBL crawl on free tier)."""
+    from app.cloud_lite import is_cloud_lite
     from app.loading_response import loading_matchup_payload
     from app.pages_mirror import seed_matchup_from_pages
 
-    # Do NOT wipe shared schedule here — rebuilding the pool OOMs free tier.
+    # Free tier OOMs if we rebuild schedule/panels — Pages is the data source.
+    if is_cloud_lite():
+        await seed_matchup_from_pages(
+            "cpbl", team_id, games, store=store_matchup, cache_version=CACHE_VERSION
+        )
+        return
+
     cached = get_matchup(team_id, games)
     if not cached:
         await seed_matchup_from_pages(

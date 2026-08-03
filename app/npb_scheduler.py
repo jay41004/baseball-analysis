@@ -77,11 +77,17 @@ async def ensure_a_table(team_id: int, *, force: bool = False) -> dict[str, Any]
 
 
 async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> None:
-    """Cloud-safe: update next-game header without full panel rebuild."""
-    import copy
-
+    """Cloud-safe: mirror GitHub Pages snapshot (no live NPB crawl on free tier)."""
+    from app.cloud_lite import is_cloud_lite
     from app.loading_response import loading_matchup_payload
     from app.pages_mirror import seed_matchup_from_pages
+
+    # Free tier: never call NPB network for full next-game rebuild here.
+    if is_cloud_lite():
+        await seed_matchup_from_pages(
+            "npb", team_id, games, store=store_matchup, cache_version=CACHE_VERSION
+        )
+        return
 
     cached = get_matchup(team_id, games)
     if not cached:
@@ -90,16 +96,18 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         )
         cached = get_matchup(team_id, games)
 
+    matchup = None
     client = NpbClient()
     try:
         matchup = await fetch_next_matchup(client, team_id)
     except Exception:
-        logger.exception("NPB header fetch failed for team %s", team_id)
-        return
+        logger.exception("NPB header fetch failed for team %s (keeping Pages/cache)", team_id)
     finally:
         await client.close()
     if not matchup:
         return
+
+    import copy
 
     if cached:
         data = copy.deepcopy(cached["data"])

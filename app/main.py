@@ -288,7 +288,7 @@ async def api_meta():
     npb_cached = npb_cached_team_count(DEFAULT_GAMES)
     cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
     return {
-        "deployMark": "2026-08-03-dual-sync-v2",
+        "deployMark": "2026-08-03-dual-sync-v3",
         "cloudLite": is_cloud_lite(),
         "renderEnv": bool(__import__("os").environ.get("RENDER")),
         "cloudLiteEnv": __import__("os").environ.get("CLOUD_LITE", ""),
