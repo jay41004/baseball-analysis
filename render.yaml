@@ -1,0 +1,20 @@
+# Render Blueprint — live API (header sync + GitHub Pages mirror on free tier)
+# Full panel rebuilds run on GitHub Actions → Pages. Render patches next-game headers.
+
+services:
+  - type: web
+    name: baseball-inning-analysis
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: CLOUD_LITE
+        value: "1"
+      - key: REFRESH_SECONDS
+        value: "3600"
+      - key: PAGES_DATA_BASE
+        value: "https://jay41004.github.io/baseball-analysis/data"

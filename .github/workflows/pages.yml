@@ -1,0 +1,12 @@
+# Replaced by refresh-pages.yml (scheduled full rebuild + deploy).
+# Kept empty on-purpose so old "deploy docs without refresh" path is disabled.
+name: (disabled) old pages deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Use workflow refresh-pages.yml instead"
