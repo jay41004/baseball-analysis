@@ -753,11 +753,17 @@ async def fetch_next_matchup(
     data = resp.json()
 
     upcoming: list[dict[str, Any]] = []
+    today_iso = date.today().isoformat()
     for day in data.get("dates", []):
         for game in day.get("games", []):
             state = game.get("status", {}).get("abstractGameState")
-            if state in UPCOMING_GAME_STATES:
-                upcoming.append(game)
+            if state not in UPCOMING_GAME_STATES:
+                continue
+            # Drop stale "Live/In Progress" leftovers from prior calendar days.
+            official = game.get("officialDate") or day.get("date") or ""
+            if state == "Live" and official and official < today_iso:
+                continue
+            upcoming.append(game)
 
     if not upcoming:
         return None
