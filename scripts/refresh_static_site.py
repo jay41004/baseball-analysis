@@ -30,15 +30,23 @@ async def _refresh_mlb(concurrency: int) -> None:
     load_from_disk()
     teams = await fetch_teams()
     sem = asyncio.Semaphore(concurrency)
+    failed = 0
 
     async def one(team: dict) -> None:
+        nonlocal failed
         async with sem:
             tid = int(team["id"])
-            logger.info("MLB refresh team %s (%s)", tid, team.get("nameZh") or team.get("name"))
-            await refresh_matchup(tid, DEFAULT_GAMES)
+            try:
+                logger.info("MLB refresh team %s (%s)", tid, team.get("nameZh") or team.get("name"))
+                await refresh_matchup(tid, DEFAULT_GAMES)
+            except Exception:
+                failed += 1
+                logger.exception("MLB team %s failed (continuing)", tid)
 
     await asyncio.gather(*[one(t) for t in teams])
-    logger.info("MLB refresh done (%s teams)", len(teams))
+    logger.info("MLB refresh done (%s teams, %s failed)", len(teams), failed)
+    if failed >= max(10, len(teams) // 2):
+        raise RuntimeError(f"MLB refresh too many failures: {failed}/{len(teams)}")
 
 
 async def _refresh_npb(concurrency: int) -> None:
@@ -49,15 +57,23 @@ async def _refresh_npb(concurrency: int) -> None:
     load_from_disk()
     teams = await fetch_npb_teams()
     sem = asyncio.Semaphore(concurrency)
+    failed = 0
 
     async def one(team: dict) -> None:
+        nonlocal failed
         async with sem:
             tid = int(team["id"])
-            logger.info("NPB refresh team %s", tid)
-            await refresh_matchup(tid, DEFAULT_GAMES)
+            try:
+                logger.info("NPB refresh team %s", tid)
+                await refresh_matchup(tid, DEFAULT_GAMES)
+            except Exception:
+                failed += 1
+                logger.exception("NPB team %s failed (continuing)", tid)
 
     await asyncio.gather(*[one(t) for t in teams])
-    logger.info("NPB refresh done (%s teams)", len(teams))
+    logger.info("NPB refresh done (%s teams, %s failed)", len(teams), failed)
+    if failed >= max(6, len(teams) // 2):
+        raise RuntimeError(f"NPB refresh too many failures: {failed}/{len(teams)}")
 
 
 async def _refresh_cpbl(concurrency: int) -> None:
@@ -68,15 +84,23 @@ async def _refresh_cpbl(concurrency: int) -> None:
     load_from_disk()
     teams = await fetch_cpbl_teams()
     sem = asyncio.Semaphore(max(1, concurrency // 2))
+    failed = 0
 
     async def one(team: dict) -> None:
+        nonlocal failed
         async with sem:
             tid = int(team["id"])
-            logger.info("CPBL refresh team %s", tid)
-            await refresh_matchup(tid, DEFAULT_GAMES)
+            try:
+                logger.info("CPBL refresh team %s", tid)
+                await refresh_matchup(tid, DEFAULT_GAMES)
+            except Exception:
+                failed += 1
+                logger.exception("CPBL team %s failed (continuing)", tid)
 
     await asyncio.gather(*[one(t) for t in teams])
-    logger.info("CPBL refresh done (%s teams)", len(teams))
+    logger.info("CPBL refresh done (%s teams, %s failed)", len(teams), failed)
+    if failed >= 4:
+        raise RuntimeError(f"CPBL refresh too many failures: {failed}/{len(teams)}")
 
 
 async def refresh_leagues(leagues: list[str], concurrency: int) -> None:
@@ -104,10 +128,11 @@ async def refresh_leagues(leagues: list[str], concurrency: int) -> None:
             logger.exception("CPBL refresh failed")
             errors.append("cpbl")
 
-    if errors and "mlb" in errors:
+    # Never deploy a totally empty rebuild: MLB is required.
+    if "mlb" in errors:
         raise SystemExit(f"Critical refresh failed: {', '.join(errors)}")
     if errors:
-        logger.warning("Some leagues failed (site will still deploy): %s", ", ".join(errors))
+        logger.warning("Some leagues failed (site will still deploy with prior cache where possible): %s", ", ".join(errors))
 
 
 def main() -> None:

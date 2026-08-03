@@ -8,9 +8,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 COPY templates ./templates
+COPY scripts ./scripts
 COPY data ./data
 
 ENV PORT=8000
+ENV CLOUD_LITE=0
 EXPOSE 8000
 
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}

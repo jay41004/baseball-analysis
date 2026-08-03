@@ -1,61 +1,46 @@
-# 雲端部署指南（GitHub Pages + Render 雙軌）
+# 雲端部署指南
 
-**手機主站（完整數據，定時更新）：** https://jay41004.github.io/baseball-analysis/  
-**即時 API（Render）：** https://baseball-analysis.onrender.com  
+**手機主站（建議固定用這個）：** https://jay41004.github.io/baseball-analysis/  
+**Render 備援：** https://baseball-analysis.onrender.com  
+
+穩定度與「自己架站」請看 **[可靠度說明.md](可靠度說明.md)**。
 
 ---
 
-## 兩邊怎麼分工（修好後不要再混用角色）
+## 兩邊角色（不要混）
 
-| | GitHub Pages | Render |
+| | GitHub Pages | Render 免費 |
 |--|--|--|
-| 用途 | **手機日常看** | 需要即時刷新 / 本機以外的 API |
-| 資料 | Actions 每 4 小時完整重建 | 從 Pages **同步面板** + 即時更新「下一場」標頭 |
-| 不休眠 | 是 | 免費版約 15 分鐘會睡 |
-
-兩邊會對齊：Render 沒資料時會先拉 Pages；有人打開時再更新下一場日期／先發。
+| 角色 | **主站**，每 2 小時完整更新 | 備援；資料從 Pages 同步 |
+| 不休眠 | 是 | 否（約 15 分鐘沒人會睡） |
 
 ---
 
-## 最快更新方式（本機改好程式）
+## 更新程式碼
 
-1. 雙擊 **`一鍵上傳.bat`**（會打包 `deploy_ready` 並開啟上傳頁）
-2. 把 `deploy_ready` 裡**全部**拖到 GitHub → Commit
-3. GitHub → **Actions** → `Refresh data and deploy GitHub Pages` → **Run workflow**
-4. Render → **Manual Deploy** → Deploy latest commit
-5. 確認 `https://baseball-analysis.onrender.com/api/meta` 的 `deployMark` 為最新
+```bat
+git add -A
+git commit -m "你的說明"
+git push origin main
+```
 
----
+資料不會因每次 push 自動重抓（避免更新互相取消）。  
+要立刻刷新數據：GitHub → **Actions** → `Refresh data and deploy GitHub Pages` → **Run workflow**。
 
-## 你需要準備
-
-1. [GitHub](https://github.com) 帳號  
-2. [Render](https://render.com) 帳號（可用 GitHub 登入）  
-3. Repo：`jay41004/baseball-analysis`（已連 Render）
-
-**一定要上傳：** `app/`、`static/`、`templates/`、`scripts/`、`.github/`、`requirements.txt`、`render.yaml`、`.gitignore`、`data/.gitkeep`（可含 `data/cpbl_schedule.json`）
-
-**不要上傳：** 本機除錯檔、`probe_*`、巨大舊 `cache.json`（會讓 Render 卡在過期場次）
+或雙擊 `一鍵上傳.bat`（無 Git 時）。
 
 ---
 
-## 免費版注意
+## 自己架常駐站（較不易壞）
 
-| 項目 | 說明 |
-|------|------|
-| Render 休眠 | 約 15 分鐘沒人訪問會睡，第一次可能等 30～60 秒 |
-| Pages | 不依賴 Render；手機優先開 GitHub 站 |
-| 確認就緒 | Pages：`/data/meta.json`；Render：`/api/meta` 且 `deployMark` 正確 |
+- Windows：雙擊 **`本機常駐更新.bat`**
+- VPS：`docker compose up -d --build`（見 `可靠度說明.md`）
 
 ---
 
-## 常見問題
+## 確認是否正常
 
-**Q：一邊對、一邊錯？**  
-先確認兩邊程式都是同一版（上傳完整 `deploy_ready` + Render redeploy + 跑過 Pages Refresh）。
-
-**Q：Render 還顯示很舊的場次？**  
-舊 seed 快取；新版會從 Pages 同步並刷新標頭。強制開一次該隊頁面或等 redeploy 後再試。
-
-**Q：部署失敗？**  
-Render → Logs；GitHub → Actions 看 Refresh 是否失敗。
+- Pages：https://jay41004.github.io/baseball-analysis/data/meta.json  
+  看 `generatedAt` 是否為近幾小時內，三聯盟數量夠（MLB≈30、NPB≈12、CPBL≈6）
+- Render：https://baseball-analysis.onrender.com/api/meta  
+  `deployMark` 應含 `dual-sync`

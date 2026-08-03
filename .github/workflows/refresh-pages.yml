@@ -1,22 +1,13 @@
 name: Refresh data and deploy GitHub Pages
 
-# Builds full caches on Actions, then publishes to the gh-pages branch.
-# Avoids the protected "github-pages" environment that blocked deploys from main.
+# Full rebuild on a schedule. Pushing code does NOT cancel/rebuild data
+# (that was causing "fixed today, broken tomorrow" thrash).
 
 on:
   schedule:
-    # Every 4 hours (UTC). Taiwan ≈ UTC+8 → 08/12/16/20/00/04 local.
-    - cron: "0 */4 * * *"
+    # Every 2 hours (UTC). Taiwan ≈ UTC+8 → even hours local.
+    - cron: "15 */2 * * *"
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "app/**"
-      - "static/**"
-      - "templates/**"
-      - "scripts/**"
-      - "requirements.txt"
-      - ".github/workflows/refresh-pages.yml"
 
 permissions:
   contents: write
@@ -34,6 +25,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch previous Pages snapshot
+        continue-on-error: true
+        run: |
+          rm -rf prev_docs
+          git fetch origin gh-pages --depth 1 || true
+          if git rev-parse --verify origin/gh-pages >/dev/null 2>&1; then
+            git worktree add prev_docs origin/gh-pages
+          else
+            mkdir -p prev_docs
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,6 +51,9 @@ jobs:
           REFRESH_LEAGUES: "mlb,npb,cpbl"
         run: python scripts/refresh_static_site.py
 
+      - name: Keep previous league data if new build is thinner
+        run: python scripts/merge_keep_best.py prev_docs docs
+
       - name: Verify static site
         run: |
           test -f docs/index.html
@@ -56,10 +61,15 @@ jobs:
           test -f docs/data/meta.json
           python - <<'PY'
           import json
+          from datetime import datetime, timezone
           from pathlib import Path
           meta = json.loads(Path("docs/data/meta.json").read_text(encoding="utf-8"))
           print(meta)
           assert meta.get("mlbTeamsCached", 0) >= 20, meta
+          assert meta.get("npbTeamsCached", 0) >= 8, meta
+          assert meta.get("cpblTeamsCached", 0) >= 4, meta
+          # Must look like a real refresh timestamp exists
+          assert meta.get("generatedAt"), meta
           PY
 
       - name: Deploy docs/ to gh-pages branch
