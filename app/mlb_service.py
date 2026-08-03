@@ -753,22 +753,29 @@ async def fetch_next_matchup(
     data = resp.json()
 
     upcoming: list[dict[str, Any]] = []
-    today_iso = date.today().isoformat()
+    # Taiwan can be ahead of MLB officialDate: keep Live games from yesterday.
+    # Only drop extremely stale "Live" leftovers (2+ calendar days old).
+    stale_live_before = (date.today() - timedelta(days=2)).isoformat()
     for day in data.get("dates", []):
         for game in day.get("games", []):
             state = game.get("status", {}).get("abstractGameState")
             if state not in UPCOMING_GAME_STATES:
                 continue
-            # Drop stale "Live/In Progress" leftovers from prior calendar days.
             official = game.get("officialDate") or day.get("date") or ""
-            if state == "Live" and official and official < today_iso:
+            if state == "Live" and official and official < stale_live_before:
                 continue
             upcoming.append(game)
 
     if not upcoming:
         return None
 
-    upcoming.sort(key=lambda g: g.get("gameDate", ""))
+    # Prefer a game that is actually being played over the next scheduled one.
+    def _sort_key(g: dict[str, Any]) -> tuple[int, str]:
+        state = (g.get("status") or {}).get("abstractGameState") or ""
+        priority = 0 if state in {"Live", "Warmup"} else 1
+        return (priority, g.get("gameDate") or "")
+
+    upcoming.sort(key=_sort_key)
     game = upcoming[0]
 
     def side_info(side: str) -> dict[str, Any]:

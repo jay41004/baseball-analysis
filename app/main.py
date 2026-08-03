@@ -375,10 +375,12 @@ async def api_matchup(
         needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
 
         if needs_refresh:
+            # Always patch next-game header first so Live/In-Progress shows
+            # immediately (full panel rebuild can finish in the background).
+            await refresh_matchup_header(team_id, games)
+            cached = get_matchup(team_id, games)
             if is_cloud_lite():
-                # Sync header-only (+ Pages seed) — full rebuild crashes free tier.
-                await refresh_matchup_header(team_id, games)
-                cached = get_matchup(team_id, games)
+                pass
             elif not mlb_is_refreshing(team_id, games):
                 await _schedule_matchup_refresh(
                     lambda: refresh_matchup(team_id, games), force=force
