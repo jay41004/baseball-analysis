@@ -1,0 +1,95 @@
+name: Deploy static UI to GitHub Pages
+
+# Fast path: update HTML/JS/CSS without waiting for a full data refresh.
+# Keeps existing docs/data from gh-pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "static/**"
+      - "templates/**"
+      - "scripts/build_static_site.py"
+      - ".github/workflows/deploy-static.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-static
+  cancel-in-progress: true
+
+jobs:
+  deploy-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch current Pages site
+        run: |
+          rm -rf prev_docs
+          git fetch origin gh-pages --depth 1
+          git worktree add prev_docs origin/gh-pages
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild docs UI from current templates/static + keep data
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          root = Path('.')
+          prev = Path('prev_docs')
+          docs = Path('docs')
+          if docs.exists():
+              shutil.rmtree(docs)
+          docs.mkdir()
+          # Keep previously published JSON data
+          if (prev / 'data').exists():
+              shutil.copytree(prev / 'data', docs / 'data')
+          else:
+              (docs / 'data').mkdir()
+          # Copy fresh static assets
+          shutil.copytree(root / 'static', docs / 'static')
+          # Build HTML pages with SITE_STATIC inject
+          import importlib.util
+          spec = importlib.util.spec_from_file_location('build', root / 'scripts' / 'build_static_site.py')
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          # Only run asset/html portion: reuse build helpers
+          # build_static_site.main() also exports from local cache which may be empty.
+          # So manually copy HTML via _fix_html/_copy_assets path.
+          from pathlib import Path as P
+          DOCS = P('docs')
+          def fix(html, depth):
+              return mod._fix_html(html, depth=depth)
+          pages = [
+              (root / 'templates' / 'index.html', DOCS / 'index.html', 0),
+              (root / 'templates' / 'npb.html', DOCS / 'npb' / 'index.html', 1),
+              (root / 'templates' / 'cpbl.html', DOCS / 'cpbl' / 'index.html', 1),
+          ]
+          for src, dst, depth in pages:
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              dst.write_text(fix(src.read_text(encoding='utf-8'), depth), encoding='utf-8')
+          (DOCS / '.nojekyll').write_text('', encoding='utf-8')
+          print('UI rebuilt; data teams', len(list((DOCS/'data').rglob('*.json'))))
+          PY
+
+      - name: Verify UI markers
+        run: |
+          grep -q 'api_utils.js?v=5' docs/npb/index.html
+          grep -q 'npb.js?v=44' docs/npb/index.html
+          test -f docs/data/meta.json
+
+      - name: Deploy docs/ to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          force_orphan: true
+          user_name: github-actions[bot]
+          user_email: github-actions[bot]@users.noreply.github.com
