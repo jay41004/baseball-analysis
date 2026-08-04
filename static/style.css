@@ -26,6 +26,11 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
+}
+
+html {
+  overscroll-behavior-x: none;
 }
 
 .page {

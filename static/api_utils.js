@@ -152,3 +152,86 @@ window.ApiUtils = (function () {
     { passive: false, capture: true }
   );
 })();
+
+/**
+ * Preserve .table-wrap horizontal scroll across DOM rebuilds / polls.
+ * Also detects active touch scrolling so renders can defer.
+ */
+window.TableScroll = (function () {
+  let interactingUntil = 0;
+  let bound = false;
+
+  function markInteracting(ms = 1500) {
+    interactingUntil = Date.now() + ms;
+  }
+
+  function isInteracting() {
+    return Date.now() < interactingUntil;
+  }
+
+  function capture() {
+    const map = {};
+    document.querySelectorAll(".table-wrap").forEach((el, index) => {
+      const key = el.dataset.scrollKey || `idx:${index}`;
+      map[key] = el.scrollLeft;
+    });
+    return map;
+  }
+
+  function restore(map) {
+    if (!map) return;
+    const apply = () => {
+      document.querySelectorAll(".table-wrap").forEach((el, index) => {
+        const key = el.dataset.scrollKey || `idx:${index}`;
+        if (map[key] != null) el.scrollLeft = map[key];
+      });
+    };
+    apply();
+    requestAnimationFrame(() => {
+      apply();
+      requestAnimationFrame(apply);
+    });
+  }
+
+  function bind() {
+    if (bound) return;
+    bound = true;
+    const mark = () => markInteracting();
+    document.addEventListener(
+      "touchstart",
+      (event) => {
+        if (event.target.closest?.(".table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+    document.addEventListener(
+      "touchmove",
+      (event) => {
+        if (event.target.closest?.(".table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.target.closest?.(".table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        if (event.target?.classList?.contains("table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bind);
+  } else {
+    bind();
+  }
+
+  return { capture, restore, isInteracting, markInteracting, bind };
+})();

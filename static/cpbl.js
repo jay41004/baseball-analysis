@@ -34,17 +34,31 @@ function buildContentFingerprint(data) {
 }
 
 function captureTableScroll() {
-  return [...document.querySelectorAll(".table-wrap")].map((el) => el.scrollLeft);
+  return window.TableScroll ? TableScroll.capture() : {};
 }
 
 function restoreTableScroll(positions) {
-  const apply = () => {
-    document.querySelectorAll(".table-wrap").forEach((el, index) => {
-      if (positions[index] != null) el.scrollLeft = positions[index];
-    });
-  };
-  apply();
-  requestAnimationFrame(apply);
+  if (window.TableScroll) TableScroll.restore(positions);
+}
+
+function updateMatchupHeader(data) {
+  const { matchup, away, home } = data;
+  const titleEl = document.getElementById("matchup-title");
+  const metaEl = document.getElementById("matchup-meta");
+  if (titleEl) {
+    titleEl.innerHTML =
+      `<span class="team-name-away">${away.teamName}</span>` +
+      `<span class="at-symbol">@</span>` +
+      `<span class="team-name-home">${home.teamName}</span>`;
+  }
+  if (metaEl) {
+    const taiwanTime = formatGameTime(matchup.gameDate);
+    const metaParts = [matchup.date];
+    if (matchup.stadium) metaParts.push(matchup.stadium.replace(/\s+/g, " ").trim());
+    if (taiwanTime) metaParts.push(`台灣 ${taiwanTime}`);
+    metaParts.push(matchup.status || "Scheduled");
+    metaEl.textContent = metaParts.join(" · ");
+  }
 }
 
 function pct(count, total) {
@@ -289,10 +303,10 @@ function formatMatchCell(game) {
   return `<span class="match-date">${game.date.slice(5)}</span><span class="match-opp">${formatOpponent(game)}</span>`;
 }
 
-function teamGamesTable(games) {
+function teamGamesTable(games, scrollKey = "team-games") {
   if (!games.length) return `<p class="empty-note">尚無數據</p>`;
   return `
-    <div class="table-wrap">
+    <div class="table-wrap" data-scroll-key="${scrollKey}">
       <table class="data-table">
         <thead>
           <tr>
@@ -325,10 +339,10 @@ function teamGamesTable(games) {
   `;
 }
 
-function pitcherGamesTable(games) {
+function pitcherGamesTable(games, scrollKey = "pitcher-games") {
   if (!games.length) return `<p class="empty-note">尚無先發數據</p>`;
   return `
-    <div class="table-wrap">
+    <div class="table-wrap" data-scroll-key="${scrollKey}">
       <table class="data-table">
         <thead>
           <tr>
@@ -388,14 +402,14 @@ function renderSideColumn(side, role) {
       <section class="panel-block">
         <h3><span class="${teamClass}">${side.teamName}</span> 近 ${gameCount} 場 · 1–5 局得分</h3>
         ${summaryCards(side.summary, totalLabel)}
-        ${teamGamesTable(side.games)}
+        ${teamGamesTable(side.games, isAway ? "away-team-games" : "home-team-games")}
       </section>
 
       <section class="panel-block">
         <h3><span class="${pitcherClass}">${pitcherDisplayName}</span> 近 ${startCount} 次先發 · 1–5 局失分（逐局掉分）</h3>
         ${
           pitcher && pitcher.games.length
-            ? `${pitcherSummaryCards(pitcher.summary, pitcher.games)}${pitcherGamesTable(pitcher.games)}`
+            ? `${pitcherSummaryCards(pitcher.summary, pitcher.games)}${pitcherGamesTable(pitcher.games, isAway ? "away-pitcher-games" : "home-pitcher-games")}`
             : `<p class="empty-note">${pitcherName === "尚未公布" ? "CPBL 尚未公布先發投手" : "找不到此投手近期先發數據"}</p>`
         }
       </section>
@@ -408,24 +422,20 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 
   const fingerprint = buildContentFingerprint(data);
   if (skipIfUnchanged && fingerprint === lastContentFingerprint) {
+    updateMatchupHeader(data);
+    return false;
+  }
+
+  if (skipIfUnchanged && window.TableScroll?.isInteracting?.()) {
+    updateMatchupHeader(data);
     return false;
   }
 
   const tableScroll = captureTableScroll();
   lastContentFingerprint = fingerprint;
 
-  const { matchup, away, home } = data;
-
-  document.getElementById("matchup-title").innerHTML =
-    `<span class="team-name-away">${away.teamName}</span>` +
-    `<span class="at-symbol">@</span>` +
-    `<span class="team-name-home">${home.teamName}</span>`;
-  const taiwanTime = formatGameTime(matchup.gameDate);
-  const metaParts = [matchup.date];
-  if (matchup.stadium) metaParts.push(matchup.stadium.replace(/\s+/g, " ").trim());
-  if (taiwanTime) metaParts.push(`台灣 ${taiwanTime}`);
-  metaParts.push(matchup.status || "Scheduled");
-  document.getElementById("matchup-meta").textContent = metaParts.join(" · ");
+  const { away, home } = data;
+  updateMatchupHeader(data);
 
   matchupGridEl.innerHTML = `
     ${renderSideColumn(away, "客隊")}

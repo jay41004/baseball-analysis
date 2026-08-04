@@ -83,7 +83,7 @@ function renderLineupBlock(side, roleLabel) {
     <article class="lineup-block">
       <h4 class="lineup-team">${roleLabel} · ${side.teamName}</h4>
       <p class="lineup-source">${lineupSourceLabel(side)}${pitcher ? ` · ${pitcher}` : ""}</p>
-      <div class="table-wrap">
+      <div class="table-wrap" data-scroll-key="lineup-${roleLabel === "客隊" ? "away" : "home"}">
         <table class="data-table lineup-table lineup-table-wide">
           <thead>
             <tr>
