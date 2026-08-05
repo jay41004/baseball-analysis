@@ -36,7 +36,19 @@ from app.inning_comparison import (
 
 logger = logging.getLogger(__name__)
 
-CPBL_BASE = "https://www.cpbl.com.tw"
+
+def _row_side_type(row: dict[str, Any]) -> int | None:
+    """CPBL APIs often return VisitingHomeType as str '1'/'2'."""
+    raw = row.get("VisitingHomeType")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+# Prefer non-www origin: HiNet CDN on www.cpbl.com.tw often 307s schedule/API
+# to the homepage or serves broken nodes (empty today's games / no pitchers).
+CPBL_BASE = "https://cpbl.com.tw"
 SCHEDULE_PAGE = f"{CPBL_BASE}/schedule"
 KIND_CODE = "A"
 TPE = timezone(timedelta(hours=8))
@@ -178,17 +190,29 @@ def summarize_pitcher_summary(rows: list[dict[str, Any]], runs_list: list[int]) 
     }
 
 
+def _inning_seq(entry: dict[str, Any]) -> int | None:
+    """CPBL may return InningSeq as int, float, or str."""
+    raw = entry.get("InningSeq")
+    if raw is None or raw == "":
+        return None
+    try:
+        value = int(float(raw))
+    except (TypeError, ValueError):
+        return None
+    return value if 1 <= value <= 20 else None
+
+
 def parse_inning_lines(scoreboard: list[dict[str, Any]]) -> tuple[list[int], list[int]]:
     away_innings = [0] * 9
     home_innings = [0] * 9
     for entry in scoreboard:
-        inning = entry.get("InningSeq") or 0
-        if not (1 <= inning <= 9):
+        inning = _inning_seq(entry)
+        if inning is None or inning > 9:
             continue
         score = entry.get("ScoreCnt")
         if score is None:
             continue
-        side = entry.get("VisitingHomeType")
+        side = _row_side_type(entry)
         if side == 1:
             away_innings[inning - 1] = int(score)
         elif side == 2:
@@ -254,39 +278,93 @@ def _scores_present(raw: dict[str, Any]) -> bool:
     )
 
 
+def _game_has_decision(raw: dict[str, Any]) -> bool:
+    """True when the schedule row shows a completed game (W/L, end time, or MVP)."""
+    for key in (
+        "WinningPitcherAcnt",
+        "WinningPitcherName",
+        "LoserPitcherAcnt",
+        "LoserPitcherName",
+        "GameDateTimeE",
+        "GameDuringTime",
+        "MvpAcnt",
+        "MvpName",
+    ):
+        value = raw.get(key)
+        if value is None:
+            continue
+        if str(value).strip() not in {"", "0", "null", "None"}:
+            return True
+    return False
+
+
 def _derive_schedule_status(raw: dict[str, Any], iso_date: str) -> str:
     """Map CPBL schedule flags to our status.
 
-    PresentStatus=1 is unreliable before first pitch (often set with null/0-0 scores),
-    which previously made today's games look Final and skipped the real matchup.
+    PresentStatus=1 is unreliable: it is set for future shells and live games.
+    Live rows use IsPlayBall=Y and lack WinningPitcher / GameDateTimeE until final.
     """
     if _flag_is_on(raw.get("IsGameStop")):
         return "Cancelled"
     today = date.today().isoformat()
     if iso_date and iso_date > today:
         return "Scheduled"
-    if str(raw.get("PresentStatus")) != "1" or not _scores_present(raw):
-        return "Scheduled"
-    # Same-day pre-game shells often show 0-0 with PresentStatus=1.
+    if _game_has_decision(raw):
+        return "Final"
+    if _flag_is_on(raw.get("IsPlayBall")):
+        return "In Progress"
     if iso_date == today:
         away = _score_value(raw.get("VisitingScore")) or 0
         home = _score_value(raw.get("HomeScore")) or 0
-        if away == 0 and home == 0:
-            return "Scheduled"
-    return "Final"
+        # Non-zero score without a decision means the game is still underway.
+        if _scores_present(raw) and (away != 0 or home != 0):
+            return "In Progress"
+        return "Scheduled"
+    # Past date with scores and PresentStatus — treat as final even if decision
+    # fields were stripped from an older cache rebuild path.
+    if str(raw.get("PresentStatus")) == "1" and _scores_present(raw):
+        return "Final"
+    return "Scheduled"
 
 
 def _repair_cached_game_status(game: dict[str, Any]) -> None:
-    """Fix disk-cached games wrongly marked Final with no real result."""
-    if game.get("status") != "Final":
+    """Fix disk-cached status (esp. live games wrongly stored as Final)."""
+    if game.get("status") == "Cancelled":
         return
     game_date = game.get("date") or ""
     today = date.today().isoformat()
-    if game_date < today:
+    has_decision = bool(game.get("hasDecision"))
+    is_play_ball = bool(game.get("isPlayBall"))
+
+    if game_date > today:
+        game["status"] = "Scheduled"
         return
+    if has_decision:
+        game["status"] = "Final"
+        return
+
     away = _score_value(game.get("awayScore"))
     home = _score_value(game.get("homeScore"))
-    if away is None or home is None or (away == 0 and home == 0 and game_date >= today):
+    scored = (
+        away is not None
+        and home is not None
+        and (away != 0 or home != 0)
+    )
+
+    if game_date == today:
+        if is_play_ball or scored:
+            game["status"] = "In Progress"
+        elif game.get("status") == "Final":
+            # Older caches marked live/pre-game shells Final once PresentStatus=1.
+            game["status"] = "Scheduled"
+        return
+
+    # Past calendar day: promote leftover In Progress → Final.
+    if game.get("status") == "In Progress":
+        game["status"] = "Final"
+    elif game.get("status") == "Final" and (
+        away is None or home is None or (away == 0 and home == 0)
+    ):
         game["status"] = "Scheduled"
 
 
@@ -318,6 +396,8 @@ def _normalize_schedule_game(raw: dict[str, Any]) -> dict[str, Any] | None:
         "stadium": raw.get("FieldAbbe") or "",
         "awayProbablePitcher": away_pitcher,
         "homeProbablePitcher": home_pitcher,
+        "hasDecision": _game_has_decision(raw),
+        "isPlayBall": _flag_is_on(raw.get("IsPlayBall")),
     }
 
 
@@ -325,7 +405,7 @@ def _starter_from_pitching(
     pitching: list[dict[str, Any]], *, visiting_home_type: int
 ) -> str | None:
     for row in pitching:
-        if row.get("VisitingHomeType") != visiting_home_type:
+        if _row_side_type(row) != visiting_home_type:
             continue
         role = (row.get("RoleType") or "").strip()
         if role == "先發":
@@ -371,7 +451,7 @@ def _parse_pitcher_runs_from_live_log(
         half_entries = [
             entry
             for entry in live_log
-            if entry.get("InningSeq") == inning and entry.get("VisitingHomeType") == defend_half
+            if _inning_seq(entry) == inning and _row_side_type(entry) == defend_half
         ]
         if not half_entries:
             continue
@@ -442,25 +522,40 @@ def _parse_box_payload(raw: dict[str, Any], *, game_sno: int | str, year: int) -
 def _parse_lineup_from_first_sno(
     first_sno: list[dict[str, Any]], *, visiting_home_type: int
 ) -> list[dict[str, Any]]:
+    """Official firstSno repeats the same Lineup slot when a player changes position.
+
+    Keep the first row per batting order 1–9 (pitchers use Lineup 0).
+    """
     rows = [
         row
         for row in first_sno
-        if row.get("VisitingHomeType") == visiting_home_type and row.get("Lineup")
+        if _row_side_type(row) == visiting_home_type
     ]
-    rows.sort(key=lambda row: int(row.get("Lineup") or 99))
-    batters: list[dict[str, Any]] = []
-    for row in rows[:9]:
-        order = row.get("Lineup")
-        batters.append(
-            {
-                "order": int(order) if order is not None else len(batters) + 1,
-                "id": row.get("Acnt"),
-                "name": row.get("CHName") or "",
-                "position": _position_abbr(row.get("DefendStationCode")),
-                "positionCode": row.get("DefendStationCode"),
-            }
-        )
-    return batters
+    by_order: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        try:
+            order = int(row.get("Lineup") or 0)
+        except (TypeError, ValueError):
+            continue
+        if order < 1 or order > 9:
+            continue
+        if order in by_order:
+            continue
+        name = (row.get("CHName") or "").strip()
+        if not name:
+            continue
+        # Skip pure pitchers in the batting card (DefendStationCode P / Lineup noise).
+        pos = str(row.get("DefendStationCode") or "").strip().upper()
+        if pos == "P":
+            continue
+        by_order[order] = {
+            "order": order,
+            "id": row.get("Acnt"),
+            "name": name,
+            "position": _position_abbr(row.get("DefendStationCode")),
+            "positionCode": row.get("DefendStationCode"),
+        }
+    return [by_order[order] for order in range(1, 10) if order in by_order]
 
 
 def _parse_lineup_from_batting(
@@ -470,7 +565,7 @@ def _parse_lineup_from_batting(
     starters = [
         row
         for row in batting
-        if row.get("VisitingHomeType") == visiting_home_type
+        if _row_side_type(row) == visiting_home_type
         and (row.get("RoleType") or "").strip() == "先發"
         and (row.get("CHName") or row.get("HitterName") or "").strip()
     ]
@@ -495,7 +590,7 @@ def _merge_lineup_positions(
     by_acnt: dict[str, dict[str, Any]] = {}
     by_name: dict[str, dict[str, Any]] = {}
     for row in first_sno:
-        if row.get("VisitingHomeType") != visiting_home_type:
+        if _row_side_type(row) != visiting_home_type:
             continue
         code = row.get("DefendStationCode")
         if not code:
@@ -545,11 +640,75 @@ def _parse_lineup_from_box(
 
 
 def _lineup_is_complete(batters: list[dict[str, Any]]) -> bool:
-    """CPBL official firstSno is often missing slots; prefer full 1–9."""
-    if len(batters) >= 9:
+    """Require unique batting orders 1–9 (len>=9 alone accepts mid-game dupes)."""
+    if len(batters) != 9:
+        return False
+    orders = [int(b.get("order") or 0) for b in batters]
+    names = [(b.get("name") or "").strip() for b in batters]
+    if len(set(orders)) != 9 or set(orders) != set(range(1, 10)):
+        return False
+    if len({n for n in names if n}) != 9:
+        return False
+    return True
+
+
+def _lineup_orders_unique(batters: list[dict[str, Any]]) -> bool:
+    """Reject mid-game firstSno slices that repeat the same batting order."""
+    if not batters:
         return True
-    orders = {int(b.get("order") or 0) for b in batters}
-    return orders.issuperset({1, 2, 3, 4, 5, 6, 7, 8, 9})
+    orders: list[int] = []
+    for batter in batters:
+        try:
+            order = int(batter.get("order") or 0)
+        except (TypeError, ValueError):
+            return False
+        if order < 1 or order > 9:
+            return False
+        orders.append(order)
+    return len(orders) == len(set(orders))
+
+
+# Bump when firstSno dedupe / order rules change so cached cards rebuild.
+CPBL_LINEUP_LOGIC_VERSION = 2
+
+
+def cpbl_lineups_need_rebuild(
+    lineups: dict[str, Any] | None,
+    *,
+    matchup_date: str | None = None,
+    matchup_status: str | None = None,
+) -> bool:
+    """True when lineup card is missing, stale logic, or not a clean 1–9 card."""
+    if not lineups:
+        return True
+    if lineups.get("logicVersion") != CPBL_LINEUP_LOGIC_VERSION:
+        return True
+    away = (lineups.get("away") or {}).get("batters") or []
+    home = (lineups.get("home") or {}).get("batters") or []
+    if away and (not _lineup_orders_unique(away) or not _lineup_is_complete(away)):
+        return True
+    if home and (not _lineup_orders_unique(home) or not _lineup_is_complete(home)):
+        return True
+    if not away and not home:
+        return True
+    # Game day: previous-game card must be refreshed once today's lineup exists.
+    if matchup_date:
+        status = (matchup_status or "").strip().lower()
+        for side in ("away", "home"):
+            side_data = lineups.get(side) or {}
+            if not (side_data.get("batters") or []):
+                continue
+            source_date = (side_data.get("sourceDate") or "")[:10]
+            source = (side_data.get("source") or "").strip().lower()
+            if source_date and source_date != matchup_date and status not in {"final"}:
+                return True
+            if (
+                source != "confirmed"
+                and source_date == matchup_date
+                and status in {"scheduled", "live", "in progress", ""}
+            ):
+                return True
+    return False
 
 
 def _lookup_pitcher_acnt(name_map: dict[str, str], pitcher_name: str | None) -> str | None:
@@ -670,13 +829,58 @@ def _team_batting_rows(
     return [
         row
         for row in batting
-        if row.get("VisitingHomeType") == visiting_home_type
+        if _row_side_type(row) == visiting_home_type
         and (row.get("RoleType") or "").strip() in {"", "先發", "替補", "代打", "代跑"}
     ]
 
 
+def _box_row_hits(row: dict[str, Any]) -> int:
+    """Hits from an official or stats-normalized batting row.
+
+    Official API: HittingCnt = hits, HitCnt = at-bats (misnamed).
+    stats.cpbl normalized rows: HitCnt = hits, no HittingCnt; hit-type counts present.
+    """
+    typed = sum(
+        int(row.get(key) or 0)
+        for key in (
+            "OneBaseHitCnt",
+            "TwoBaseHitCnt",
+            "ThreeBaseHitCnt",
+            "HomeRunCnt",
+        )
+    )
+    if typed:
+        return typed
+    if row.get("HittingCnt") is not None:
+        try:
+            return int(row.get("HittingCnt") or 0)
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return int(row.get("HitCnt") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _box_row_at_bats(row: dict[str, Any]) -> int:
+    """At-bats from an official or stats-normalized batting row.
+
+    Official API: HitCnt is AB when HittingCnt is present; PlateAppearances is PA.
+    stats.cpbl normalized rows put AB into PlateAppearances and omit HittingCnt.
+    """
+    if row.get("HittingCnt") is not None:
+        try:
+            return int(row.get("HitCnt") or 0)
+        except (TypeError, ValueError):
+            return 0
+    try:
+        return int(row.get("PlateAppearances") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _recent_batting_form(game_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    # Official box misnames AB as PlateAppearances; skip 0-AB appearances (PR/def).
+    # Skip 0-AB appearances (PR / defensive replacements).
     with_ab = [game for game in game_rows if int(game.get("atBats") or 0) > 0]
     recent3 = with_ab[:3]
     recent5 = with_ab[:5]
@@ -742,11 +946,11 @@ def _collect_batter_game_logs(
                 continue
             logs.setdefault(acnt, []).append(
                 {
-                    "hits": int(row.get("HitCnt") or 0),
-                    "atBats": int(row.get("PlateAppearances") or 0),
+                    "hits": _box_row_hits(row),
+                    "atBats": _box_row_at_bats(row),
                     "seasonAvg": row.get("SeasonAvg"),
                     "homeRuns": int(row.get("HomeRunCnt") or 0),
-                    "rbi": int(row.get("RunBattedInCnt") or 0),
+                    "rbi": int(row.get("RunBattedInCnt") or row.get("RunBattedINCnt") or 0),
                 }
             )
     return logs
@@ -787,11 +991,7 @@ def _enrich_batters_with_season_stats(
         season = season_lookup.get(acnt) or {}
         trustworthy = _season_row_trustworthy(season)
 
-        if box_avg_by_acnt and acnt in box_avg_by_acnt:
-            avg_text = format_avg(box_avg_by_acnt[acnt])
-            if avg_text:
-                copy["avg"] = avg_text
-
+        # Prefer season index (stable across matchups) over single-game SeasonAvg.
         if trustworthy:
             at_bats = season.get("atBats")
             hits = season.get("hits")
@@ -800,10 +1000,9 @@ def _enrich_batters_with_season_stats(
                 copy["hits"] = int(hits)
                 copy["abHits"] = f"{int(at_bats)}-{int(hits)}"
 
-            if not copy.get("avg"):
-                avg_text = format_avg(season.get("avg"))
-                if avg_text:
-                    copy["avg"] = avg_text
+            avg_text = format_avg(season.get("avg"))
+            if avg_text:
+                copy["avg"] = avg_text
 
             ops_text = format_ops(season.get("ops"))
             if ops_text:
@@ -813,7 +1012,7 @@ def _enrich_batters_with_season_stats(
                 copy["homeRuns"] = int(season["homeRuns"])
             if season.get("rbi") is not None:
                 copy["rbi"] = int(season["rbi"])
-        elif not copy.get("avg") and box_avg_by_acnt and acnt in box_avg_by_acnt:
+        elif box_avg_by_acnt and acnt in box_avg_by_acnt:
             avg_text = format_avg(box_avg_by_acnt[acnt])
             if avg_text:
                 copy["avg"] = avg_text
@@ -860,13 +1059,11 @@ def _enrich_batters_with_vs_pitcher(
     pairs: dict[str, Any],
     pitcher_acnt: str | None,
 ) -> list[dict[str, Any]]:
-    if not pitcher_acnt:
-        return batters
     enriched: list[dict[str, Any]] = []
     for batter in batters:
         copy = dict(batter)
         hitter_acnt = str(copy.get("id") or "")
-        if hitter_acnt:
+        if pitcher_acnt and hitter_acnt:
             copy.update(
                 lookup_vs_pitcher_avgs(
                     pairs,
@@ -874,6 +1071,9 @@ def _enrich_batters_with_vs_pitcher(
                     pitcher_acnt=pitcher_acnt,
                 )
             )
+        else:
+            copy.setdefault("vsPitcherSeasonAvg", None)
+            copy.setdefault("vsPitcherCareerAvg", None)
         enriched.append(copy)
     return enriched
 
@@ -1023,6 +1223,12 @@ class CpblClient:
                     _shared_schedule = await self._build_schedule_pool(months_back)
                     _save_schedule_disk(_shared_schedule)
                     logger.info("Built CPBL schedule pool (%s games)", len(_shared_schedule))
+                # Always re-sync current (+ next) month so live vs Final stays accurate.
+                try:
+                    await self._sync_near_term_schedule(_shared_schedule)
+                    _save_schedule_disk(_shared_schedule)
+                except Exception:
+                    logger.exception("CPBL near-term schedule sync failed")
 
         games = _shared_schedule
         repaired = False
@@ -1073,6 +1279,80 @@ class CpblClient:
             logger.exception("playsport CPBL enrich failed")
 
         return games
+
+    def _merge_normalized_schedule_game(
+        self, games: list[dict[str, Any]], by_sno: dict[Any, dict[str, Any]], normalized: dict[str, Any]
+    ) -> None:
+        game_sno = normalized.get("gameSno")
+        if game_sno is None:
+            return
+        existing = by_sno.get(game_sno)
+        if existing is None:
+            games.append(normalized)
+            by_sno[game_sno] = normalized
+            return
+        existing["status"] = normalized["status"]
+        existing["awayScore"] = normalized.get("awayScore")
+        existing["homeScore"] = normalized.get("homeScore")
+        existing["hasDecision"] = normalized.get("hasDecision")
+        existing["isPlayBall"] = normalized.get("isPlayBall")
+        existing["stadium"] = normalized.get("stadium") or existing.get("stadium") or ""
+        # Live schedule rows often blank pitcher names — keep known enrichment.
+        if normalized.get("awayProbablePitcher"):
+            existing["awayProbablePitcher"] = normalized["awayProbablePitcher"]
+        if normalized.get("homeProbablePitcher"):
+            existing["homeProbablePitcher"] = normalized["homeProbablePitcher"]
+
+    async def _fetch_month_payload(
+        self, year_value: int, month_value: int, *, schedule_page: httpx.Response | None = None
+    ) -> tuple[dict[str, Any] | None, httpx.Response | None]:
+        try:
+            if schedule_page is None:
+                schedule_page = await self._fetch_page(SCHEDULE_PAGE)
+            payload = await self._post_with_csrf(
+                SCHEDULE_PAGE,
+                "/schedule/getgamedatas",
+                {"year": year_value, "month": month_value, "kindCode": KIND_CODE},
+                page=schedule_page,
+            )
+            return payload, schedule_page
+        except (httpx.HTTPError, ValueError):
+            try:
+                schedule_page = await self._fetch_page(SCHEDULE_PAGE)
+                payload = await self._post_with_csrf(
+                    SCHEDULE_PAGE,
+                    "/schedule/getgamedatas",
+                    {"year": year_value, "month": month_value, "kindCode": KIND_CODE},
+                    page=schedule_page,
+                )
+                return payload, schedule_page
+            except (httpx.HTTPError, ValueError):
+                return None, schedule_page
+
+    async def _sync_near_term_schedule(self, games: list[dict[str, Any]]) -> None:
+        """Refresh current and next month so In Progress vs Final stays correct."""
+        today = date.today()
+        months = [(today.year, today.month)]
+        next_year, next_month = today.year, today.month + 1
+        if next_month > 12:
+            next_month = 1
+            next_year += 1
+        months.append((next_year, next_month))
+
+        by_sno = {g.get("gameSno"): g for g in games if g.get("gameSno") is not None}
+        schedule_page: httpx.Response | None = None
+        for year_value, month_value in months:
+            payload, schedule_page = await self._fetch_month_payload(
+                year_value, month_value, schedule_page=schedule_page
+            )
+            if not payload or not payload.get("Success"):
+                continue
+            for raw in _parse_json_blob(payload.get("GameDatas")):
+                normalized = _normalize_schedule_game(raw)
+                if normalized:
+                    self._merge_normalized_schedule_game(games, by_sno, normalized)
+            await asyncio.sleep(0.05)
+        games.sort(key=lambda game: (game.get("date", ""), game.get("gameSno") or 0))
 
     async def _build_schedule_pool(self, months_back: int = 6) -> list[dict[str, Any]]:
         today = date.today()
@@ -1245,15 +1525,36 @@ async def fetch_next_matchup(client: CpblClient, focus_team_id: int) -> dict[str
     future = [game for game in team_games if game.get("date", "") >= today]
     pool = future if future else team_games
 
-    def sort_key(game: dict[str, Any]) -> tuple[str, int, Any]:
+    def sort_key(game: dict[str, Any]) -> tuple[int, str, int, Any]:
         game_date = game.get("date") or "9999-99-99"
+        # Prefer live games over later scheduled shells on the same day.
+        live_rank = 0 if game.get("status") in {"In Progress", "Live"} else 1
         has_pitchers = int(
             not (game.get("awayProbablePitcher") and game.get("homeProbablePitcher"))
         )
-        return (game_date, has_pitchers, game.get("gameSno") or 0)
+        return (live_rank, game_date, has_pitchers, game.get("gameSno") or 0)
 
     pool.sort(key=sort_key)
     game = pool[0]
+
+    # Live schedule rows often blank Visiting/HomePitcherName — pull from box.
+    if (
+        game.get("status") in {"In Progress", "Live", "Scheduled"}
+        and game.get("gameSno") is not None
+        and (not game.get("awayProbablePitcher") or not game.get("homeProbablePitcher"))
+    ):
+        try:
+            box = await client.fetch_box(
+                int(game["gameSno"]), int(game.get("year") or date.today().year)
+            )
+        except (TypeError, ValueError):
+            box = None
+        if box:
+            if not game.get("awayProbablePitcher") and box.get("awayStarter"):
+                game["awayProbablePitcher"] = box["awayStarter"]
+            if not game.get("homeProbablePitcher") and box.get("homeStarter"):
+                game["homeProbablePitcher"] = box["homeStarter"]
+
     focus_is_home = game["homeTeamId"] == focus_team_id
 
     def side_info(team_id: int, probable: str | None) -> dict[str, Any]:
@@ -1420,7 +1721,7 @@ async def analyze_team_scoring(
     for meta, box in zip(needed_meta, parsed_list):
         if not box or not _box_has_inning_data(box):
             continue
-        row = _build_team_scoring_row(meta, box, team_id)
+        row = _build_team_scoring_row(meta, box, team_id, include_scored=True)
         if _row_has_scoring_data(row):
             rows.append(row)
         if len(rows) >= game_count:
@@ -1442,7 +1743,7 @@ def _starter_pitching_line(
     is_home = box.get("homeTeamId") == team_id
     side_type = 2 if is_home else 1
     for row in box.get("pitching") or []:
-        if row.get("VisitingHomeType") != side_type:
+        if _row_side_type(row) != side_type:
             continue
         if (row.get("RoleType") or "").strip() != "先發":
             continue
@@ -1797,6 +2098,12 @@ async def fetch_matchup_starting_lineups(
             if _lineup_is_complete(confirmed):
                 batters = confirmed
 
+        # Drop corrupted cards (repeated batting orders from mid-game firstSno).
+        if batters and not _lineup_orders_unique(batters):
+            batters = []
+        if batters and len(batters) >= 9 and not _lineup_is_complete(batters):
+            batters = []
+
         if batters:
             season_lookup = await get_season_batting_lookup(year)
             if not season_lookup:
@@ -1839,6 +2146,7 @@ async def fetch_matchup_starting_lineups(
             "opposingPitcher": opposing,
             "batters": batters,
         }
+    lineups["logicVersion"] = CPBL_LINEUP_LOGIC_VERSION
     return lineups
 
 
@@ -1916,3 +2224,126 @@ async def analyze_matchup_a_table(focus_team_id: int) -> dict[str, Any]:
     finally:
         await client.close()
     return {"away": away_table, "home": home_table}
+
+
+async def rebuild_pitcher_dependent_fields(
+    data: dict[str, Any], *, game_count: int = 10
+) -> dict[str, Any]:
+    """Recompute lineups (incl. vs-pitcher) + situational after starters are known.
+
+    Header-only updates used to set probablePitcher names without refreshing
+    these derived blocks — leaving empty 對戰打擊率 and 客/主場先發情境.
+    """
+    matchup = data.get("matchup") or {}
+    away = data.get("away") or {}
+    home = data.get("home") or {}
+    if not away.get("teamId") or not home.get("teamId"):
+        return data
+
+    old_lineups = data.get("startingLineups") or {}
+    old_sit = data.get("situational") or {}
+
+    lineup_matchup = {
+        "date": matchup.get("date"),
+        "gameDate": matchup.get("gameDate"),
+        "gameSno": matchup.get("gameSno"),
+        "year": int(str(matchup.get("date") or date.today().isoformat())[:4]),
+        "status": matchup.get("status"),
+        "stadium": matchup.get("stadium"),
+        "away": {
+            "teamId": away["teamId"],
+            "teamName": away.get("teamName") or "",
+            "probablePitcher": away.get("probablePitcher"),
+        },
+        "home": {
+            "teamId": home["teamId"],
+            "teamName": home.get("teamName") or "",
+            "probablePitcher": home.get("probablePitcher"),
+        },
+    }
+
+    client = CpblClient()
+    try:
+        lineups_task = asyncio.create_task(
+            fetch_matchup_starting_lineups(client, lineup_matchup)
+        )
+
+        async def _pitcher_block(panel: dict[str, Any]) -> dict[str, Any] | None:
+            probable = panel.get("probablePitcher") or {}
+            name = (probable.get("fullName") or "").strip()
+            if not name:
+                return None
+            return await analyze_pitcher_starts(
+                client,
+                name,
+                int(panel["teamId"]),
+                game_count,
+                scan_limit=40,
+            )
+
+        away_pa, home_pa, starting_lineups = await asyncio.gather(
+            _pitcher_block(away),
+            _pitcher_block(home),
+            lineups_task,
+        )
+        away = dict(away)
+        home = dict(home)
+        away["pitcherAnalysis"] = away_pa
+        home["pitcherAnalysis"] = home_pa
+
+        new_bad = cpbl_lineups_need_rebuild(starting_lineups)
+        old_bad = cpbl_lineups_need_rebuild(old_lineups)
+        if new_bad and not old_bad:
+            starting_lineups = old_lineups
+            vs_pairs = await get_vs_pitcher_lookup(lineup_matchup["year"])
+            pitcher_map = _load_pitcher_acnt_disk()
+            for side_key in ("away", "home"):
+                side_lu = (starting_lineups or {}).get(side_key) or {}
+                bats = side_lu.get("batters") or []
+                if not bats:
+                    continue
+                opposing = _resolve_opposing_pitcher(lineup_matchup, side_key=side_key)
+                pname = (opposing or {}).get("fullName") if opposing else None
+                pacnt = _lookup_pitcher_acnt(pitcher_map, pname)
+                side_lu = dict(side_lu)
+                side_lu["batters"] = _enrich_batters_with_vs_pitcher(
+                    bats, pairs=vs_pairs, pitcher_acnt=pacnt
+                )
+                side_lu["opposingPitcher"] = opposing
+                starting_lineups = dict(starting_lineups or {})
+                starting_lineups[side_key] = side_lu
+            starting_lineups["logicVersion"] = CPBL_LINEUP_LOGIC_VERSION
+        elif new_bad:
+            # Drop duplicate-order garbage (1,1,1,2,2…) instead of showing it.
+            starting_lineups = {
+                "away": {"batters": []},
+                "home": {"batters": []},
+                "logicVersion": CPBL_LINEUP_LOGIC_VERSION,
+            }
+        elif starting_lineups is not None:
+            starting_lineups = dict(starting_lineups)
+            starting_lineups["logicVersion"] = CPBL_LINEUP_LOGIC_VERSION
+
+        situational = build_matchup_situational(away, home)
+        for key in ("awayTeamAwayGames", "homeTeamHomeGames"):
+            new_block = situational.get(key) or {}
+            old_block = old_sit.get(key) or {}
+            if (new_block.get("gameCount") or 0) == 0 and (old_block.get("gameCount") or 0) > 0:
+                situational[key] = old_block
+        for key in ("awayPitcherAwayStarts", "homePitcherHomeStarts"):
+            new_block = situational.get(key) or {}
+            old_block = old_sit.get(key) or {}
+            if (new_block.get("gameCount") or 0) == 0 and (old_block.get("gameCount") or 0) > 0:
+                situational[key] = old_block
+
+        away = strip_panel_internals(away)
+        home = strip_panel_internals(home)
+    finally:
+        await client.close()
+
+    data = dict(data)
+    data["away"] = away
+    data["home"] = home
+    data["startingLineups"] = starting_lineups
+    data["situational"] = situational
+    return data

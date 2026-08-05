@@ -61,7 +61,13 @@ from app.cpbl_cache import (
     wrap_a_table_response as wrap_cpbl_a_table_response,
     wrap_matchup_response as wrap_cpbl_matchup_response,
 )
-from app.cpbl_service import CpblClient, fetch_cpbl_teams, fetch_matchup_starting_lineups, fetch_next_matchup
+from app.cpbl_service import (
+    CpblClient,
+    cpbl_lineups_need_rebuild,
+    fetch_cpbl_teams,
+    fetch_matchup_starting_lineups,
+    fetch_next_matchup,
+)
 from app.cpbl_verify import verify_cpbl
 from app.cpbl_scheduler import refresh_matchup as refresh_cpbl_matchup
 from app.cpbl_scheduler import is_refreshing as cpbl_is_refreshing
@@ -168,7 +174,12 @@ async def _wrap_npb_matchup(team_id: int, entry: dict, *, refreshing: bool) -> d
     payload = await asyncio.to_thread(
         wrap_npb_matchup_response, entry, refreshing=refreshing
     )
-    if npb_lineups_need_rebuild(payload.get("startingLineups")):
+    matchup = payload.get("matchup") or {}
+    if npb_lineups_need_rebuild(
+        payload.get("startingLineups"),
+        matchup_date=(matchup.get("date") or "")[:10],
+        matchup_status=matchup.get("status"),
+    ):
         payload["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
     return _attach_a_table(
         payload,
@@ -181,6 +192,13 @@ async def _wrap_npb_matchup(team_id: int, entry: dict, *, refreshing: bool) -> d
 
 def _wrap_cpbl_matchup(team_id: int, entry: dict, *, refreshing: bool) -> dict:
     payload = wrap_cpbl_matchup_response(entry, refreshing=refreshing)
+    matchup = payload.get("matchup") or {}
+    if cpbl_lineups_need_rebuild(
+        payload.get("startingLineups"),
+        matchup_date=(matchup.get("date") or "")[:10],
+        matchup_status=matchup.get("status"),
+    ):
+        payload["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
     return _attach_a_table(
         payload,
         team_id,
@@ -508,13 +526,17 @@ async def api_cpbl_matchup(
 async def api_cpbl_lineup(
     team_id: int = Query(..., ge=1, le=6, description="Selected CPBL team ID"),
     games: int = Query(DEFAULT_GAMES, ge=1, le=30),
+    force: bool = Query(False, description="Rebuild lineups from CPBL boxscore"),
 ):
     cached = get_cpbl_matchup(team_id, games)
     lineups = (cached.get("data") or {}).get("startingLineups") if cached else None
-    away_count = len((lineups or {}).get("away", {}).get("batters") or [])
-    home_count = len((lineups or {}).get("home", {}).get("batters") or [])
-    # Official firstSno is often incomplete (6–7 batters). Prefer a full 9-man card.
-    if away_count >= 9 and home_count >= 9:
+    matchup_meta = (cached.get("data") or {}).get("matchup") if cached else None
+    # Require unique batting orders 1–9 — len>=9 alone used to keep mid-game dupes.
+    if not force and not cpbl_lineups_need_rebuild(
+        lineups,
+        matchup_date=((matchup_meta or {}).get("date") or "")[:10],
+        matchup_status=(matchup_meta or {}).get("status"),
+    ):
         return lineups
 
     client = CpblClient()
@@ -583,7 +605,12 @@ async def api_npb_lineup(
 ):
     cached = get_npb_matchup(team_id, games)
     lineups = (cached.get("data") or {}).get("startingLineups") if cached else None
-    if not force and not npb_lineups_need_rebuild(lineups):
+    matchup_meta = (cached.get("data") or {}).get("matchup") if cached else None
+    if not force and not npb_lineups_need_rebuild(
+        lineups,
+        matchup_date=((matchup_meta or {}).get("date") or "")[:10],
+        matchup_status=(matchup_meta or {}).get("status"),
+    ):
         if lineups:
             lineups = copy.deepcopy(lineups)
             localize_starting_lineups(lineups)
@@ -643,6 +670,20 @@ async def api_cpbl_verify(
         }
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"CPBL verify 錯誤: {exc}") from exc
+
+
+@app.get("/api/health/data")
+async def api_health_data(
+    repair: bool = Query(False, description="Auto-repair CPBL wrong matchups"),
+):
+    """Validate MLB/NPB/CPBL caches (wrong game, absurd avgs, thin panels)."""
+    try:
+        from app.data_validate import validate_all_caches
+
+        report = await validate_all_caches(repair_cpbl=repair)
+        return report
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"資料驗證錯誤: {exc}") from exc
 
 
 @app.get("/api/mlb/a-table")

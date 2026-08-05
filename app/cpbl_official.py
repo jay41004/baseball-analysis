@@ -11,7 +11,8 @@ import httpx
 
 from app.cpbl_teams import team_by_code
 
-CPBL_BASE = "https://www.cpbl.com.tw"
+# Prefer non-www origin; www CDN nodes frequently break schedule/game APIs.
+CPBL_BASE = "https://cpbl.com.tw"
 KIND_CODE = "A"
 
 CPBL_HEADERS = {
@@ -59,14 +60,43 @@ def _normalize_home_game(raw: dict[str, Any]) -> dict[str, Any] | None:
     )
     home_pitcher = _pitcher_name(raw, "HomePitcherName", "HomeFirstMover", "HomePitcher")
 
-    status = "Scheduled"
+    # Mirror cpbl_service: PresentStatus alone is not Final (live + future shells).
     today = date.today().isoformat()
-    scores_ready = (
-        raw.get("VisitingScore") is not None and raw.get("HomeScore") is not None
+    has_decision = any(
+        str(raw.get(k) or "").strip() not in {"", "0"}
+        for k in (
+            "WinningPitcherAcnt",
+            "WinningPitcherName",
+            "GameDateTimeE",
+            "GameDuringTime",
+            "MvpAcnt",
+        )
     )
-    if str(raw.get("PresentStatus")) == "1" and scores_ready:
-        status = "Final"
+    is_play_ball = str(raw.get("IsPlayBall") or "").strip() in {"1", "Y", "y", "true", "True"}
+    away_score = raw.get("VisitingScore")
+    home_score = raw.get("HomeScore")
+    try:
+        scored = int(away_score or 0) != 0 or int(home_score or 0) != 0
+    except (TypeError, ValueError):
+        scored = False
+
+    if str(raw.get("IsGameStop") or "").strip() in {"1", "Y", "y", "true", "True"}:
+        status = "Cancelled"
     elif iso_date and iso_date > today:
+        status = "Scheduled"
+    elif has_decision:
+        status = "Final"
+    elif is_play_ball or (iso_date == today and scored):
+        status = "In Progress"
+    elif (
+        str(raw.get("PresentStatus")) == "1"
+        and away_score is not None
+        and home_score is not None
+        and iso_date
+        and iso_date < today
+    ):
+        status = "Final"
+    else:
         status = "Scheduled"
 
     return {
@@ -77,8 +107,8 @@ def _normalize_home_game(raw: dict[str, Any]) -> dict[str, Any] | None:
         "homeTeamId": home_team["id"],
         "awayNameZh": away_team["nameZh"],
         "homeNameZh": home_team["nameZh"],
-        "awayScore": raw.get("VisitingScore"),
-        "homeScore": raw.get("HomeScore"),
+        "awayScore": away_score,
+        "homeScore": home_score,
         "status": status,
         "stadium": raw.get("FieldAbbe") or "",
         "awayProbablePitcher": away_pitcher,
@@ -147,13 +177,17 @@ async def enrich_schedule_probable_pitchers(
     http: httpx.AsyncClient, games: list[dict[str, Any]]
 ) -> None:
     """Fill missing probable pitchers from the official homepage API."""
-    today = date.today().isoformat()
+    from datetime import timedelta
+
+    today = date.today()
+    today_iso = today.isoformat()
+    horizon_iso = (today + timedelta(days=7)).isoformat()
     dates: set[str] = set()
     for game in games:
         if game.get("awayProbablePitcher") and game.get("homeProbablePitcher"):
             continue
         iso_date = game.get("date") or ""
-        if iso_date >= today:
+        if today_iso <= iso_date <= horizon_iso:
             dates.add(iso_date)
 
     official_by_sno: dict[Any, dict[str, Any]] = {}

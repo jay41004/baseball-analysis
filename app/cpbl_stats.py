@@ -240,8 +240,10 @@ def parse_stats_batting(html: str, *, game_sno: int, year: int) -> list[dict[str
                     "HitterAcnt": row.get("hitterAcnt"),
                     "Acnt": row.get("hitterAcnt"),
                     "CHName": (row.get("hitterName") or "").strip(),
-                    "HitCnt": _game_hit_count(row),
-                    "PlateAppearances": _game_at_bats(row),
+                    # Match official box shape: HitCnt=AB, HittingCnt=hits.
+                    "HitCnt": _game_at_bats(row),
+                    "HittingCnt": _game_hit_count(row),
+                    "PlateAppearances": int(row.get("plateAppearances") or 0),
                     "OneBaseHitCnt": int(row.get("oneBaseHitCnt") or 0),
                     "TwoBaseHitCnt": int(row.get("twoBaseHitCnt") or 0),
                     "ThreeBaseHitCnt": int(row.get("threeBaseHitCnt") or 0),

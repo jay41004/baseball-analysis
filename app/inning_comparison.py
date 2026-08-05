@@ -146,6 +146,15 @@ def _team_situational_block(
 ) -> dict[str, Any]:
     pool = panel.get("_scoredPool") or []
     rows = [row for row in pool if bool(row.get("isHome")) == is_home][:limit]
+    # After strip_panel_internals, _scoredPool is gone — fall back to games
+    # that carry scoredInnings (kept on the public panel payload).
+    if not rows:
+        games = panel.get("games") or []
+        rows = [
+            row
+            for row in games
+            if bool(row.get("isHome")) == is_home and row.get("scoredInnings") is not None
+        ][:limit]
     scored_counts, _ = counts_from_game_rows(rows)
     return {
         "teamName": panel.get("teamName") or "",

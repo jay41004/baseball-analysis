@@ -56,6 +56,9 @@ jobs:
           REFRESH_LEAGUES: "mlb,npb,cpbl"
         run: python scripts/refresh_static_site.py
 
+      - name: Audit exported data (fail on wrong game / absurd avgs / thin panels)
+        run: python scripts/audit_and_repair_data.py --data-dir docs/data --repair --fail-on-critical
+
       - name: Keep previous league data if new build is thinner
         run: python scripts/merge_keep_best.py prev_docs docs
 
@@ -64,17 +67,21 @@ jobs:
           test -f docs/index.html
           test -f docs/data/mlb/teams.json
           test -f docs/data/meta.json
+          test -f docs/data/health.json
           python - <<'PY'
           import json
-          from datetime import datetime, timezone
           from pathlib import Path
           meta = json.loads(Path("docs/data/meta.json").read_text(encoding="utf-8"))
-          print(meta)
+          health = json.loads(Path("docs/data/health.json").read_text(encoding="utf-8"))
+          print("meta", {k: meta.get(k) for k in ("generatedAt","mlbTeamsCached","npbTeamsCached","cpblTeamsCached")})
+          print("health_ok", health.get("ok"), "critical", health.get("critical"))
+          print("cpblApi", health.get("cpblApi"))
+          print("cpbl_warnings", (health.get("cpbl") or {}).get("warnings"))
           assert meta.get("mlbTeamsCached", 0) >= 20, meta
           assert meta.get("npbTeamsCached", 0) >= 8, meta
           assert meta.get("cpblTeamsCached", 0) >= 4, meta
-          # Must look like a real refresh timestamp exists
           assert meta.get("generatedAt"), meta
+          assert not health.get("critical"), health.get("critical")
           PY
 
       - name: Deploy docs/ to gh-pages branch

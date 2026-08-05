@@ -119,3 +119,119 @@ window.ApiUtils = (function () {
 
   return { readJson, fetchJson, isHtmlBody };
 })();
+
+/** Keep horizontal table scrolling from bouncing back to the page. */
+(function bindTableHorizontalScroll() {
+  if (window.__tableWheelBound) return;
+  window.__tableWheelBound = true;
+
+  document.addEventListener(
+    "wheel",
+    (event) => {
+      const wrap = event.target.closest?.(".table-wrap");
+      if (!wrap) return;
+      if (wrap.scrollWidth <= wrap.clientWidth + 1) return;
+
+      const absX = Math.abs(event.deltaX);
+      const absY = Math.abs(event.deltaY);
+      let delta = 0;
+      if (absX > absY && absX > 0) {
+        delta = event.deltaX;
+      } else if (event.shiftKey && absY > 0) {
+        delta = event.deltaY;
+      } else {
+        return;
+      }
+
+      const maxScroll = wrap.scrollWidth - wrap.clientWidth;
+      const next = Math.min(maxScroll, Math.max(0, wrap.scrollLeft + delta));
+      wrap.scrollLeft = next;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    { passive: false, capture: true }
+  );
+})();
+
+/**
+ * Preserve .table-wrap horizontal scroll across DOM rebuilds / polls.
+ * Also detects active touch scrolling so renders can defer.
+ */
+window.TableScroll = (function () {
+  let interactingUntil = 0;
+  let bound = false;
+
+  function markInteracting(ms = 1500) {
+    interactingUntil = Date.now() + ms;
+  }
+
+  function isInteracting() {
+    return Date.now() < interactingUntil;
+  }
+
+  function capture() {
+    const map = {};
+    document.querySelectorAll(".table-wrap").forEach((el, index) => {
+      const key = el.dataset.scrollKey || `idx:${index}`;
+      map[key] = el.scrollLeft;
+    });
+    return map;
+  }
+
+  function restore(map) {
+    if (!map) return;
+    const apply = () => {
+      document.querySelectorAll(".table-wrap").forEach((el, index) => {
+        const key = el.dataset.scrollKey || `idx:${index}`;
+        if (map[key] != null) el.scrollLeft = map[key];
+      });
+    };
+    apply();
+    requestAnimationFrame(() => {
+      apply();
+      requestAnimationFrame(apply);
+    });
+  }
+
+  function bind() {
+    if (bound) return;
+    bound = true;
+    const mark = () => markInteracting();
+    document.addEventListener(
+      "touchstart",
+      (event) => {
+        if (event.target.closest?.(".table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+    document.addEventListener(
+      "touchmove",
+      (event) => {
+        if (event.target.closest?.(".table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.target.closest?.(".table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        if (event.target?.classList?.contains("table-wrap")) mark();
+      },
+      { passive: true, capture: true }
+    );
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bind);
+  } else {
+    bind();
+  }
+
+  return { capture, restore, isInteracting, markInteracting, bind };
+})();

@@ -137,44 +137,161 @@ def parse_pitcher_acnt_map(html: str, *, game_sno: int, year: int) -> dict[str, 
     return mapping
 
 
-async def build_vs_pitcher_index(year: int | None = None) -> dict[str, Any]:
+def _plays_from_live_log(
+    live_log: list[dict[str, Any]], *, game_sno: int, year: int
+) -> list[dict[str, Any]]:
+    """Normalize official box liveLog rows into the stats-PBP play shape."""
+    plays: list[dict[str, Any]] = []
+    for entry in live_log:
+        hitter = str(entry.get("HitterAcnt") or "")
+        pitcher = str(entry.get("PitcherAcnt") or "")
+        if not hitter or not pitcher:
+            continue
+        action = (
+            entry.get("BattingActionName") or entry.get("ActionName") or ""
+        ).strip()
+        plays.append(
+            {
+                "year": str(entry.get("Year") or year),
+                "gameSno": entry.get("GameSno") or game_sno,
+                "inningSeq": entry.get("InningSeq"),
+                "mainEventNo": entry.get("MainEventNo"),
+                "pitchCnt": entry.get("PitchCnt"),
+                "hitterAcnt": hitter,
+                "pitcherAcnt": pitcher,
+                "battingActionName": action,
+                "actionName": (entry.get("ActionName") or "").strip(),
+                "battingOrder": entry.get("BattingOrder") or entry.get("HitterLineup"),
+                "pitcherName": (entry.get("PitcherName") or "").strip(),
+            }
+        )
+    return plays
+
+
+def _apply_outcomes(
+    pairs: dict[str, dict[str, dict[str, int]]],
+    outcomes: list[dict[str, Any]],
+    *,
+    season_year: int,
+    game_year: int,
+) -> None:
+    for row in outcomes:
+        key = _pair_key(row["hitterAcnt"], row["pitcherAcnt"])
+        entry = pairs.setdefault(
+            key,
+            {"season": _empty_bucket(), "career": _empty_bucket()},
+        )
+        _merge_outcome(entry["career"], row["action"])
+        if game_year == season_year:
+            _merge_outcome(entry["season"], row["action"])
+
+
+async def _index_year_from_official(
+    pairs: dict[str, dict[str, dict[str, int]]],
+    *,
+    season_year: int,
+    game_year: int,
+    max_misses: int = 8,
+) -> int:
+    """Scan official boxes for a season; stats.cpbl often lacks prior-year PBP."""
+    from app.cpbl_service import CpblClient
+
+    client = CpblClient()
+    games_ok = 0
+    misses = 0
+    try:
+        # Regular season is usually < 360; stop after consecutive empty snos.
+        for game_sno in range(1, 400):
+            box = await client.fetch_box(game_sno, game_year)
+            if not box or not (box.get("liveLog") or []):
+                misses += 1
+                if games_ok and misses >= max_misses:
+                    break
+                continue
+            misses = 0
+            games_ok += 1
+            plays = _plays_from_live_log(
+                box.get("liveLog") or [], game_sno=game_sno, year=game_year
+            )
+            _apply_outcomes(
+                pairs,
+                _extract_pa_outcomes(plays),
+                season_year=season_year,
+                game_year=game_year,
+            )
+            # Keep pitcher name→acnt map warm for lineup enrich.
+            name_map = {
+                (p.get("pitcherName") or "").strip(): str(p.get("pitcherAcnt") or "")
+                for p in plays
+                if p.get("pitcherName") and p.get("pitcherAcnt")
+            }
+            if name_map:
+                from app.cpbl_service import _save_pitcher_acnt_disk
+
+                _save_pitcher_acnt_disk(name_map)
+            await asyncio.sleep(0.05)
+    finally:
+        await client.close()
+    return games_ok
+
+
+async def build_vs_pitcher_index(
+    year: int | None = None, *, career_years: int = 5
+) -> dict[str, Any]:
+    """Build batter-vs-pitcher AVGs.
+
+    ``season`` = current ``year`` only (stats.cpbl PBP when available).
+    ``career`` = current year + prior seasons via official box liveLog
+    (stats.cpbl HTML for older years has no play-by-play payload).
+    """
     year = year or date.today().year
     from app.cpbl_stats import fetch_stats_schedule
 
     pairs: dict[str, dict[str, dict[str, int]]] = {}
+    years = list(range(max(2014, year - career_years + 1), year + 1))
+
+    # Current season from stats site (fast path when PBP is embedded).
     async with httpx.AsyncClient(timeout=60, headers=STATS_HEADERS) as http:
-        schedule = await fetch_stats_schedule(http)
+        season_games = await fetch_stats_schedule(http)
         games = [
             game
-            for game in schedule
+            for game in season_games
             if game.get("gameSno") is not None
             and int(game.get("year") or year) == year
-            and game.get("status") in {"Final", "In Progress", "Live", "Scheduled"}
+            and (game.get("status") or "")
+            in {"Final", "In Progress", "Live", "Scheduled", ""}
         ]
         games.sort(key=lambda game: game.get("gameSno") or 0)
-
+        logger.info("CPBL vs-pitcher indexing season %s (%s games)", year, len(games))
         for game in games:
             game_sno = int(game["gameSno"])
-            game_year = int(game.get("year") or year)
-            html = await _fetch_stats_game_html(http, game_sno, game_year)
+            html = await _fetch_stats_game_html(http, game_sno, year)
             if not html:
                 await asyncio.sleep(0.15)
                 continue
-            plays = parse_stats_pbp_plays(html, game_sno=game_sno, year=game_year)
-            for row in _extract_pa_outcomes(plays):
-                key = _pair_key(row["hitterAcnt"], row["pitcherAcnt"])
-                entry = pairs.setdefault(
-                    key,
-                    {"season": _empty_bucket(), "career": _empty_bucket()},
-                )
-                _merge_outcome(entry["career"], row["action"])
-                if str(row.get("year") or game_year) == str(year):
-                    _merge_outcome(entry["season"], row["action"])
+            plays = parse_stats_pbp_plays(html, game_sno=game_sno, year=year)
+            _apply_outcomes(
+                pairs,
+                _extract_pa_outcomes(plays),
+                season_year=year,
+                game_year=year,
+            )
             await asyncio.sleep(0.08)
+
+    # Prior seasons: official liveLog (stats site returns shell pages only).
+    for game_year in years:
+        if game_year == year:
+            continue
+        logger.info("CPBL vs-pitcher indexing career year %s via official boxes", game_year)
+        counted = await _index_year_from_official(
+            pairs, season_year=year, game_year=game_year
+        )
+        logger.info("CPBL vs-pitcher career year %s: %s boxes", game_year, counted)
 
     payload = {
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "year": year,
+        "careerYears": years,
         "pairs": pairs,
     }
     _save_disk_cache(payload)

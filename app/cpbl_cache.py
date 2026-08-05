@@ -13,7 +13,7 @@ from app.inning_comparison import a_table_payload_complete
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 14
+CACHE_VERSION = 15
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "cpbl_cache.json"
@@ -41,11 +41,21 @@ def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
     hit = _store.get(_matchup_key(team_id, games))
     if hit:
         return hit
+    # Prefer newest cacheVersion among any loaded keys for this team/games.
     suffix = f":{team_id}:{games}"
+    best: dict[str, Any] | None = None
+    best_ver = -1
     for key, value in _store.items():
-        if key.startswith("cpbl:matchup:v") and key.endswith(suffix):
-            return value
-    return None
+        if not (key.startswith("cpbl:matchup:v") and key.endswith(suffix)):
+            continue
+        try:
+            ver = int(key.split("cpbl:matchup:v", 1)[1].split(":", 1)[0])
+        except (TypeError, ValueError, IndexError):
+            ver = 0
+        if ver > best_ver:
+            best_ver = ver
+            best = value
+    return best
 
 
 def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
@@ -148,9 +158,35 @@ def load_from_disk() -> None:
 
 def save_to_disk() -> None:
     CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    prefix = _key_prefix()
-    payload = {key: value for key, value in _store.items() if key.startswith(prefix)}
-    CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    existing: dict[str, Any] = {}
+    if CACHE_FILE.exists():
+        try:
+            raw = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                existing = raw
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    # Merge in-memory entries (do not wipe other processes' / older-version keys).
+    existing.update(_store)
+    # Drop stale older matchup versions for the same team/games when current exists.
+    current_prefix = _key_prefix()
+    drop: list[str] = []
+    for key in list(existing):
+        if not key.startswith("cpbl:matchup:v") or key.startswith(current_prefix):
+            continue
+        suffix = key.split("cpbl:matchup:v", 1)[-1]
+        # suffix like "14:1:10" → team:games is after first ':'
+        parts = suffix.split(":")
+        if len(parts) < 3:
+            continue
+        team_games = ":".join(parts[1:])
+        if f"{current_prefix}{team_games}" in existing:
+            drop.append(key)
+    for key in drop:
+        existing.pop(key, None)
+    CACHE_FILE.write_text(
+        json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def wrap_matchup_response(

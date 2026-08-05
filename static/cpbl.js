@@ -580,6 +580,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
         teamId,
         games,
         fetchWithTimeout,
+        force,
       });
       syncATable(SiteConfig.api("/api/cpbl"), teamId, data.aTable, { force, matchReady: true });
     }

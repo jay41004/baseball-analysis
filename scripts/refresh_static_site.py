@@ -134,6 +134,26 @@ async def refresh_leagues(leagues: list[str], concurrency: int) -> None:
     if errors:
         logger.warning("Some leagues failed (site will still deploy with prior cache where possible): %s", ", ".join(errors))
 
+    # Auto-validate + repair CPBL (wrong game / pitchers / absurd batter avgs).
+    if "cpbl" in leagues and "cpbl" not in errors:
+        try:
+            from scripts.audit_and_repair_data import _probe_cpbl_schedule_api
+            from app.data_validate import validate_cpbl_cache
+
+            api = await _probe_cpbl_schedule_api()
+            logger.info("CPBL schedule API probe: %s", api)
+            result = await validate_cpbl_cache(games=DEFAULT_GAMES, repair=True)
+            logger.info(
+                "CPBL validate/repair: ok=%s issues=%s repair=%s",
+                result.get("ok"),
+                len(result.get("issues") or []),
+                result.get("repair"),
+            )
+            if not result.get("ok"):
+                logger.error("CPBL validation issues remain: %s", result.get("issues"))
+        except Exception:
+            logger.exception("CPBL audit/repair failed (continuing to build)")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()

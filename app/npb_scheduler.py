@@ -221,20 +221,31 @@ async def refresh_all_matchups(games: int = DEFAULT_GAMES) -> None:
             targets = _teams_needing_refresh(teams, games)
             if not targets:
                 logger.info("NPB cache already warm for all %s teams", len(teams))
-                return
+            else:
+                semaphore = asyncio.Semaphore(WARMUP_CONCURRENCY)
 
-            semaphore = asyncio.Semaphore(WARMUP_CONCURRENCY)
+                async def refresh_one(team: dict) -> None:
+                    async with semaphore:
+                        await refresh_matchup(team["id"], games)
 
-            async def refresh_one(team: dict) -> None:
-                async with semaphore:
-                    await refresh_matchup(team["id"], games)
+                await asyncio.gather(*[refresh_one(team) for team in targets])
+                logger.info(
+                    "Finished warming NPB cache (%s/%s teams refreshed)",
+                    len(targets),
+                    len(teams),
+                )
+            try:
+                from app.data_validate import validate_npb_cache
 
-            await asyncio.gather(*[refresh_one(team) for team in targets])
-            logger.info(
-                "Finished warming NPB cache (%s/%s teams refreshed)",
-                len(targets),
-                len(teams),
-            )
+                report = await validate_npb_cache(games=games)
+                if not report.get("ok"):
+                    logger.error(
+                        "NPB validation issues (%s): %s",
+                        len(report.get("issues") or []),
+                        (report.get("issues") or [])[:8],
+                    )
+            except Exception:
+                logger.exception("NPB post-refresh validation failed")
         finally:
             _warming_all = False
 

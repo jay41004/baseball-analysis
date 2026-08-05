@@ -41,6 +41,13 @@ function formatRecentAvg(value) {
   return value.startsWith(".") ? value : `.${value}`;
 }
 
+function formatRisp(batter) {
+  const avg = formatRecentAvg(batter.rispAvg);
+  if (avg === "—" || batter.rispAtBats == null) return avg;
+  const hits = batter.rispHits ?? 0;
+  return `${avg} (${hits}/${batter.rispAtBats})`;
+}
+
 function pitcherNote(side) {
   const name = side?.opposingPitcher?.fullName;
   return name ? `對手投手：${name}` : "";
@@ -57,7 +64,7 @@ function renderLineupBlock(side, roleLabel) {
         <tr>
           <td class="col-name">${batterLabel(batter)}</td>
           <td class="col-stat">${formatStat(batter.avg)}</td>
-          <td class="col-stat">${formatRecentAvg(batter.rispAvg)}</td>
+          <td class="col-stat">${formatRisp(batter)}</td>
           <td class="col-stat">${formatStat(batter.homeRuns)}</td>
           <td class="col-stat">${formatStat(batter.rbi)}</td>
           <td class="col-stat">${formatStat(batter.vsPitcherSeasonAvg)}</td>
@@ -76,7 +83,7 @@ function renderLineupBlock(side, roleLabel) {
     <article class="lineup-block">
       <h4 class="lineup-team">${roleLabel} · ${side.teamName}</h4>
       <p class="lineup-source">${lineupSourceLabel(side)}${pitcher ? ` · ${pitcher}` : ""}</p>
-      <div class="table-wrap">
+      <div class="table-wrap" data-scroll-key="lineup-${roleLabel === "客隊" ? "away" : "home"}">
         <table class="data-table lineup-table lineup-table-wide">
           <thead>
             <tr>
@@ -106,7 +113,7 @@ function renderLineupSection(lineups) {
   return `
     <details class="lineup-section card" open>
       <summary class="lineup-summary">先發打線 · 本季成績</summary>
-      <p class="lineup-note">若本場尚未公布先發，顯示該隊上一場比賽的先發打序。得點圈打擊率 = 二、三壘有人時的打擊率；對投手成績為對本場先發投手；近3安打 = 近3場有安打的場數。</p>
+      <p class="lineup-note">若本場尚未公布先發，顯示該隊上一場比賽的先發打序。打擊率／得點圈／全壘打／打點：MLB、NPB 皆為本季（NPB 得點圈取自整季統計）；對投手成績為對本場先發投手（有公布先發時）；近3安打 = 近3場有安打的場數。</p>
       <div class="lineup-grid">
         ${awayBlock}
         ${homeBlock}

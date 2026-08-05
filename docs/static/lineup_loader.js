@@ -42,13 +42,14 @@ window.LineupLoader = (function () {
     if (root) root.innerHTML = "";
   }
 
-  async function fetchLineupsWhenReady({ apiPath, teamId, games, fetchWithTimeout }) {
+  async function fetchLineupsWhenReady({ apiPath, teamId, games, fetchWithTimeout, force = false }) {
     clearLineupPollTimer();
     lineupPollAttempts = 0;
 
     const poll = async () => {
       try {
         const qs = new URLSearchParams({ team_id: teamId, games: String(games) });
+        if (force) qs.set("force", "true");
         const resp = await fetchWithTimeout(`${apiPath}/lineup?${qs}`, LINEUP_FETCH_TIMEOUT_MS);
         const lineups = window.ApiUtils
           ? await ApiUtils.readJson(resp)
@@ -64,6 +65,8 @@ window.LineupLoader = (function () {
 
       lineupPollAttempts += 1;
       if (lineupPollAttempts < MAX_LINEUP_POLLS) {
+        // Only force on the first attempt; retries use rebuilt cache.
+        force = false;
         lineupPollTimer = setTimeout(poll, LINEUP_POLL_MS);
       } else {
         showLineupLoading("打線載入失敗，請按「立即更新」重試。");
@@ -73,22 +76,22 @@ window.LineupLoader = (function () {
     poll();
   }
 
-  function ensureLineups(lineups, { apiPath, teamId, games, fetchWithTimeout }) {
-    if (lineupsReady(lineups)) {
+  function ensureLineups(lineups, { apiPath, teamId, games, fetchWithTimeout, force = false } = {}) {
+    if (!force && lineupsReady(lineups)) {
       lastGoodLineups = lineups;
       syncLineup(lineups);
       clearLineupPollTimer();
       return;
     }
 
-    if (lineupsReady(lastGoodLineups)) {
+    if (!force && lineupsReady(lastGoodLineups)) {
       syncLineup(lastGoodLineups);
     } else {
-      showLineupLoading();
+      showLineupLoading(force ? "正在重抓先發打線…" : "打線載入中…（約 30～60 秒）");
     }
 
     if (apiPath && teamId && typeof fetchWithTimeout === "function" && !window.SiteConfig?.isStatic) {
-      fetchLineupsWhenReady({ apiPath, teamId, games, fetchWithTimeout });
+      fetchLineupsWhenReady({ apiPath, teamId, games, fetchWithTimeout, force });
     }
   }
 

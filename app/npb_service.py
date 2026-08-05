@@ -974,15 +974,30 @@ def _recent_batting_form_from_box_logs(
 NPB_LINEUP_LOGIC_VERSION = 7
 
 
-def npb_lineups_need_rebuild(lineups: dict[str, Any] | None) -> bool:
+def npb_lineups_need_rebuild(
+    lineups: dict[str, Any] | None,
+    *,
+    matchup_date: str | None = None,
+    matchup_status: str | None = None,
+) -> bool:
     if not lineups:
         return True
     if lineups.get("logicVersion") != NPB_LINEUP_LOGIC_VERSION:
         return True
     for side in ("away", "home"):
-        count = len((lineups.get(side) or {}).get("batters") or [])
+        side_data = lineups.get(side) or {}
+        count = len(side_data.get("batters") or [])
         if count == 0 or count < 7:
             return True
+        # On game day, never keep "上一場先發" once today's confirmed card should exist.
+        if matchup_date:
+            source_date = (side_data.get("sourceDate") or "")[:10]
+            source = (side_data.get("source") or "").strip().lower()
+            status = (matchup_status or "").strip().lower()
+            if source_date and source_date != matchup_date and status not in {"final"}:
+                return True
+            if source != "confirmed" and source_date == matchup_date and status in {"scheduled", "live", "in progress"}:
+                return True
     return False
 
 

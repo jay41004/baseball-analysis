@@ -26,6 +26,11 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   overscroll-behavior-x: none;
+  overscroll-behavior-y: contain;
+}
+
+html {
+  overscroll-behavior-x: none;
 }
 
 .page {
@@ -452,8 +457,10 @@ button:hover {
 
 .table-wrap {
   overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
   margin-top: 10px;
 }
 
