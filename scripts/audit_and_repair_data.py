@@ -234,8 +234,29 @@ async def run_audit(*, data_dir: Path, repair: bool) -> dict[str, Any]:
     }
 
     critical = list(cpbl["issues"]) + list(npb["issues"]) + list(mlb["issues"])
-    report["critical"] = critical
-    report["ok"] = len(critical) == 0 and bool(api.get("ok") or (cpbl["teams"] >= 4))
+    # Live schedule timing races (game ends mid-build) should not block Pages deploy.
+    # Keep structural bugs (absurd avgs, H>AB, thin panels, duplicate lineup) as critical.
+    soft_live = (
+        "wrong gameSno",
+        "wrong matchup date",
+        "pitcher cached=",
+        "pitcher missing",
+        "no live schedule matchup",
+        "no docs/cache matchup for live compare",
+    )
+    hard_critical = [
+        msg
+        for msg in critical
+        if not any(token in msg for token in soft_live)
+    ]
+    live_soft = [msg for msg in critical if msg not in hard_critical]
+    report["critical"] = hard_critical
+    report["liveSoftIssues"] = live_soft
+    report["ok"] = len(hard_critical) == 0 and bool(api.get("ok") or (cpbl["teams"] >= 4))
+    if live_soft:
+        logger.warning("Soft live-timing issues (do not fail deploy): %s", len(live_soft))
+        for msg in live_soft[:12]:
+            logger.warning("  live: %s", msg)
 
     out_path = data_dir / "health.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)

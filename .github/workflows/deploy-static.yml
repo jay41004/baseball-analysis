@@ -81,9 +81,14 @@ jobs:
 
       - name: Verify UI markers
         run: |
-          grep -q 'api_utils.js?v=5' docs/npb/index.html
-          grep -q 'npb.js?v=44' docs/npb/index.html
           test -f docs/data/meta.json
+          grep -q 'style.css?v=' docs/index.html
+          grep -q 'app.js?v=' docs/index.html
+          grep -q 'npb.js?v=' docs/npb/index.html
+          grep -q 'cpbl.js?v=' docs/cpbl/index.html
+          grep -q 'touch-action: pan-x pan-y' docs/static/style.css
+          grep -q 'games-table' docs/static/app.js
+          grep -q 'th-short' docs/static/cpbl.js
 
       - name: Deploy docs/ to gh-pages
         uses: peaceiris/actions-gh-pages@v4

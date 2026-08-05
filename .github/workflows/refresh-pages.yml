@@ -59,6 +59,9 @@ jobs:
       - name: Audit exported data (fail on wrong game / absurd avgs / thin panels)
         run: python scripts/audit_and_repair_data.py --data-dir docs/data --repair --fail-on-critical
 
+      # Force a re-run path marker so push of audit fixes re-triggers this workflow.
+      # (workflow only auto-runs on changes to this file or schedule/manual.)
+
       - name: Keep previous league data if new build is thinner
         run: python scripts/merge_keep_best.py prev_docs docs
 
