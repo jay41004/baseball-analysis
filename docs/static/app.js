@@ -160,13 +160,13 @@ function summaryCards(summary, totalLabel) {
 function teamFirstInningBadge(scored) {
   return scored
     ? '<span class="badge win">得分</span>'
-    : '<span class="badge under">未得分</span>';
+    : '<span class="badge under">未得</span>';
 }
 
 function inningScoredBadge(scored) {
   return scored
     ? '<span class="badge loss">掉分</span>'
-    : '<span class="badge win">未掉分</span>';
+    : '<span class="badge win">未掉</span>';
 }
 
 function getScoredInnings(game) {
@@ -306,13 +306,13 @@ function teamGamesTable(games, scrollKey = "team-games") {
   if (!games.length) return `<p class="empty-note">尚無數據</p>`;
   return `
     <div class="table-wrap" data-scroll-key="${scrollKey}">
-      <table class="data-table">
+      <table class="data-table games-table">
         <thead>
           <tr>
             <th class="col-match">日期 / 對手</th>
             <th class="col-score">比分</th>
-            <th class="col-num">1局得分</th>
-            <th class="col-num">1–5 得分</th>
+            <th class="col-num"><span class="th-full">1局得分</span><span class="th-short">1局</span></th>
+            <th class="col-num"><span class="th-full">1–5 得分</span><span class="th-short">1-5</span></th>
             <th class="col-ou">1.5</th>
             <th class="col-ou">2.5</th>
           </tr>
@@ -342,14 +342,14 @@ function pitcherGamesTable(games, scrollKey = "pitcher-games") {
   if (!games.length) return `<p class="empty-note">尚無先發數據</p>`;
   return `
     <div class="table-wrap" data-scroll-key="${scrollKey}">
-      <table class="data-table">
+      <table class="data-table games-table">
         <thead>
           <tr>
             <th class="col-match">日期 / 對手</th>
             <th class="col-score">比分</th>
-            <th class="col-num">掉分局數</th>
-            <th class="col-num">1局掉分</th>
-            <th class="col-num">1–5 失分</th>
+            <th class="col-num"><span class="th-full">掉分局數</span><span class="th-short">掉分局</span></th>
+            <th class="col-num"><span class="th-full">1局掉分</span><span class="th-short">1局</span></th>
+            <th class="col-num"><span class="th-full">1–5 失分</span><span class="th-short">1-5</span></th>
             <th class="col-ou">1.5</th>
             <th class="col-ou">2.5</th>
           </tr>

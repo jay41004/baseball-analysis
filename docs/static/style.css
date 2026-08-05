@@ -549,6 +549,10 @@ table.data-table .col-ou .badge {
   font-size: 0.84rem;
 }
 
+.th-short {
+  display: none;
+}
+
 th {
   color: var(--muted);
   font-weight: 600;
@@ -923,24 +927,67 @@ table.data-table.a-table .col-allowed-start {
     min-width: 100%;
   }
 
-  table.data-table .col-match {
-    width: 38%;
-    padding: 6px 6px;
-    font-size: 0.78rem;
+  /* Don't crush O/U columns — scroll horizontally instead. */
+  table.data-table.games-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
   }
 
-  table.data-table .match-date {
+  table.data-table.games-table .th-full {
+    display: none;
+  }
+
+  table.data-table.games-table .th-short {
+    display: inline;
+  }
+
+  table.data-table.games-table thead th {
+    font-size: 0.74rem;
+    white-space: nowrap;
+    padding: 6px 4px;
+  }
+
+  table.data-table.games-table th,
+  table.data-table.games-table td {
+    font-size: 0.78rem;
+    padding: 6px 4px;
+  }
+
+  table.data-table.games-table .col-match {
+    width: auto;
+    min-width: 5.8rem;
+    max-width: 7.5rem;
+    padding: 6px 6px;
+    font-size: 0.74rem;
+  }
+
+  table.data-table.games-table .match-date {
     margin-bottom: 1px;
   }
 
-  table.data-table .col-num {
-    width: 13%;
-    padding: 6px 3px;
+  table.data-table.games-table .col-score {
+    width: auto;
+    min-width: 3rem;
   }
 
-  table.data-table .col-ou {
-    width: 12%;
-    min-width: 3.2rem;
-    padding: 6px 3px;
+  table.data-table.games-table .col-num {
+    width: auto;
+    min-width: 2.6rem;
+  }
+
+  table.data-table.games-table .col-ou {
+    width: auto;
+    min-width: 2.8rem;
+  }
+
+  table.data-table.games-table .badge {
+    padding: 2px 5px;
+    font-size: 0.72rem;
+  }
+
+  table.data-table.games-table .col-ou .badge {
+    padding: 2px 5px;
+    font-size: 0.72rem;
   }
 }
