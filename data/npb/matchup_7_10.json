@@ -1,0 +1,778 @@
+{
+  "focusTeamId": 7,
+  "matchup": {
+    "date": "2026-08-09",
+    "gameDate": "2026-08-09T17:00:00+09:00",
+    "status": "Scheduled",
+    "stadium": "Belluna Dome 17:00"
+  },
+  "away": {
+    "teamId": 7,
+    "teamName": "福岡软银",
+    "games": [
+      {
+        "date": "2026-08-07",
+        "opponent": "埼玉西武",
+        "opponentStarter": "髙橋光成",
+        "isHome": false,
+        "teamScore": 5,
+        "opponentScore": 2,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-06",
+        "opponent": "日本火腿",
+        "opponentStarter": "細野",
+        "isHome": true,
+        "teamScore": 2,
+        "opponentScore": 6,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-05",
+        "opponent": "日本火腿",
+        "opponentStarter": "北山",
+        "isHome": true,
+        "teamScore": 7,
+        "opponentScore": 5,
+        "firstInningRuns": 3,
+        "firstInningScored": true,
+        "firstFiveRuns": 5,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-08-04",
+        "opponent": "日本火腿",
+        "opponentStarter": "伊藤",
+        "isHome": true,
+        "teamScore": 1,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-02",
+        "opponent": "东北乐天",
+        "opponentStarter": "古謝",
+        "isHome": false,
+        "teamScore": 10,
+        "opponentScore": 6,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 4,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-08-01",
+        "opponent": "东北乐天",
+        "opponentStarter": "早川",
+        "isHome": false,
+        "teamScore": 5,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-26",
+        "opponent": "埼玉西武",
+        "opponentStarter": "髙橋光成",
+        "isHome": false,
+        "teamScore": 3,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-25",
+        "opponent": "埼玉西武",
+        "opponentStarter": "武内",
+        "isHome": false,
+        "teamScore": 6,
+        "opponentScore": 8,
+        "firstInningRuns": 1,
+        "firstInningScored": true,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-24",
+        "opponent": "埼玉西武",
+        "opponentStarter": "渡邉",
+        "isHome": false,
+        "teamScore": 7,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-23",
+        "opponent": "欧力士",
+        "opponentStarter": "山口",
+        "isHome": true,
+        "teamScore": 6,
+        "opponentScore": 5,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      }
+    ],
+    "summary": {
+      "totalGames": 10,
+      "over15": 7,
+      "under15": 3,
+      "over25": 7,
+      "under25": 3,
+      "avgRuns": 2.6,
+      "firstInningScored": 2,
+      "firstInningNoScore": 8
+    },
+    "probablePitcher": null,
+    "pitcherAnalysis": null
+  },
+  "home": {
+    "teamId": 11,
+    "teamName": "埼玉西武",
+    "games": [
+      {
+        "date": "2026-08-07",
+        "opponent": "福岡软银",
+        "opponentStarter": "松本晴",
+        "isHome": true,
+        "teamScore": 2,
+        "opponentScore": 5,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-05",
+        "opponent": "千叶罗德",
+        "opponentStarter": "毛利",
+        "isHome": false,
+        "teamScore": 0,
+        "opponentScore": 8,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-04",
+        "opponent": "千叶罗德",
+        "opponentStarter": "小島",
+        "isHome": false,
+        "teamScore": 3,
+        "opponentScore": 5,
+        "firstInningRuns": 2,
+        "firstInningScored": true,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-08-02",
+        "opponent": "欧力士",
+        "opponentStarter": "髙島",
+        "isHome": true,
+        "teamScore": 5,
+        "opponentScore": 1,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-08-01",
+        "opponent": "欧力士",
+        "opponentStarter": "Jerry",
+        "isHome": true,
+        "teamScore": 4,
+        "opponentScore": 1,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-31",
+        "opponent": "欧力士",
+        "opponentStarter": "寺西",
+        "isHome": true,
+        "teamScore": 4,
+        "opponentScore": 5,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-26",
+        "opponent": "福岡软银",
+        "opponentStarter": "前田悠",
+        "isHome": true,
+        "teamScore": 0,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-25",
+        "opponent": "福岡软银",
+        "opponentStarter": "大津",
+        "isHome": true,
+        "teamScore": 8,
+        "opponentScore": 6,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 2,
+        "over15": true,
+        "over25": false
+      },
+      {
+        "date": "2026-07-24",
+        "opponent": "福岡软银",
+        "opponentStarter": "上茶谷",
+        "isHome": true,
+        "teamScore": 3,
+        "opponentScore": 7,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-23",
+        "opponent": "日本火腿",
+        "opponentStarter": "北山",
+        "isHome": true,
+        "teamScore": 2,
+        "opponentScore": 11,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      }
+    ],
+    "summary": {
+      "totalGames": 10,
+      "over15": 5,
+      "under15": 5,
+      "over25": 4,
+      "under25": 6,
+      "avgRuns": 1.6,
+      "firstInningScored": 1,
+      "firstInningNoScore": 9
+    },
+    "probablePitcher": null,
+    "pitcherAnalysis": null
+  },
+  "aTable": {
+    "away": {
+      "teamName": "福岡软银",
+      "recent5": {
+        "gameCount": 5,
+        "scoredCounts": {
+          "1": 1,
+          "2": 2,
+          "3": 0,
+          "4": 2,
+          "5": 0,
+          "6": 3,
+          "7": 1,
+          "8": 2,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 1,
+          "2": 0,
+          "3": 2,
+          "4": 1,
+          "5": 1,
+          "6": 3,
+          "7": 1,
+          "8": 2,
+          "9": 0
+        }
+      },
+      "recent10": {
+        "gameCount": 10,
+        "scoredCounts": {
+          "1": 2,
+          "2": 3,
+          "3": 1,
+          "4": 5,
+          "5": 2,
+          "6": 5,
+          "7": 4,
+          "8": 4,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 1,
+          "2": 3,
+          "3": 2,
+          "4": 2,
+          "5": 2,
+          "6": 4,
+          "7": 1,
+          "8": 2,
+          "9": 1
+        }
+      },
+      "recent20": {
+        "gameCount": 20,
+        "scoredCounts": {
+          "1": 5,
+          "2": 6,
+          "3": 5,
+          "4": 9,
+          "5": 6,
+          "6": 8,
+          "7": 6,
+          "8": 6,
+          "9": 3
+        },
+        "allowedCounts": {
+          "1": 5,
+          "2": 6,
+          "3": 5,
+          "4": 5,
+          "5": 5,
+          "6": 5,
+          "7": 3,
+          "8": 3,
+          "9": 3
+        }
+      }
+    },
+    "home": {
+      "teamName": "埼玉西武",
+      "recent5": {
+        "gameCount": 5,
+        "scoredCounts": {
+          "1": 1,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 3,
+          "6": 0,
+          "7": 1,
+          "8": 3,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 0,
+          "2": 2,
+          "3": 1,
+          "4": 2,
+          "5": 0,
+          "6": 2,
+          "7": 2,
+          "8": 1,
+          "9": 0
+        }
+      },
+      "recent10": {
+        "gameCount": 10,
+        "scoredCounts": {
+          "1": 1,
+          "2": 3,
+          "3": 1,
+          "4": 2,
+          "5": 3,
+          "6": 1,
+          "7": 1,
+          "8": 3,
+          "9": 1
+        },
+        "allowedCounts": {
+          "1": 1,
+          "2": 3,
+          "3": 2,
+          "4": 5,
+          "5": 1,
+          "6": 6,
+          "7": 3,
+          "8": 1,
+          "9": 0
+        }
+      },
+      "recent20": {
+        "gameCount": 20,
+        "scoredCounts": {
+          "1": 3,
+          "2": 5,
+          "3": 5,
+          "4": 4,
+          "5": 7,
+          "6": 4,
+          "7": 4,
+          "8": 6,
+          "9": 2
+        },
+        "allowedCounts": {
+          "1": 2,
+          "2": 6,
+          "3": 7,
+          "4": 5,
+          "5": 4,
+          "6": 8,
+          "7": 6,
+          "8": 2,
+          "9": 2
+        }
+      }
+    }
+  },
+  "startingLineups": {
+    "logicVersion": 7,
+    "away": {
+      "teamName": "福岡软银",
+      "source": "previous",
+      "sourceDate": "2026-08-07",
+      "opposingPitcher": null,
+      "batters": [
+        {
+          "order": 1,
+          "name": "正木",
+          "position": "一",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".077",
+          "recent5Avg": ".091",
+          "avg": ".276",
+          "homeRuns": 16,
+          "rbi": 40,
+          "rispAvg": ".232"
+        },
+        {
+          "order": 2,
+          "name": "周東",
+          "position": "中",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".231",
+          "recent5Avg": ".190",
+          "avg": ".277",
+          "homeRuns": 1,
+          "rbi": 26,
+          "rispAvg": ".288"
+        },
+        {
+          "order": 3,
+          "name": "近藤",
+          "position": "左",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".444",
+          "recent5Avg": ".375",
+          "avg": ".314",
+          "homeRuns": 23,
+          "rbi": 82,
+          "rispAvg": ".363"
+        },
+        {
+          "order": 4,
+          "name": "栗原",
+          "position": "三",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".100",
+          "recent5Avg": ".059",
+          "avg": ".251",
+          "homeRuns": 30,
+          "rbi": 78,
+          "rispAvg": ".300"
+        },
+        {
+          "order": 5,
+          "name": "柳田",
+          "position": "DH",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".333",
+          "recent5Avg": ".368",
+          "avg": ".276",
+          "homeRuns": 11,
+          "rbi": 43,
+          "rispAvg": ".282"
+        },
+        {
+          "order": 6,
+          "name": "牧原大",
+          "position": "右二",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".583",
+          "recent5Avg": ".524",
+          "avg": ".294",
+          "homeRuns": 2,
+          "rbi": 29,
+          "rispAvg": ".263"
+        },
+        {
+          "order": 7,
+          "name": "山本祐",
+          "position": "捕",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".222",
+          "recent5Avg": ".250",
+          "avg": ".319",
+          "homeRuns": 2,
+          "rbi": 17
+        },
+        {
+          "order": 8,
+          "name": "川瀬",
+          "position": "二游",
+          "recent3HitGames": 0,
+          "recent3Games": 3,
+          "recent3Avg": ".000",
+          "recent5Avg": ".188",
+          "avg": ".227",
+          "homeRuns": 0,
+          "rbi": 12
+        },
+        {
+          "order": 9,
+          "name": "庄子",
+          "position": "游",
+          "recent3HitGames": 0,
+          "recent3Games": 3,
+          "recent3Avg": ".000",
+          "recent5Avg": ".000",
+          "avg": ".220",
+          "homeRuns": 0,
+          "rbi": 11,
+          "rispAvg": ".256"
+        }
+      ]
+    },
+    "home": {
+      "teamName": "埼玉西武",
+      "source": "previous",
+      "sourceDate": "2026-08-07",
+      "opposingPitcher": null,
+      "batters": [
+        {
+          "order": 1,
+          "name": "Kanario",
+          "position": "右",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".222",
+          "recent5Avg": ".167",
+          "avg": ".242",
+          "homeRuns": 9,
+          "rbi": 36,
+          "rispAvg": ".274"
+        },
+        {
+          "order": 2,
+          "name": "林安可",
+          "position": "左",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".182",
+          "recent5Avg": ".294",
+          "avg": ".232",
+          "homeRuns": 6,
+          "rbi": 22,
+          "rispAvg": ".229"
+        },
+        {
+          "order": 3,
+          "name": "Nebin",
+          "position": "一",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".375",
+          "recent5Avg": ".235",
+          "avg": ".275",
+          "homeRuns": 16,
+          "rbi": 38,
+          "rispAvg": ".174"
+        },
+        {
+          "order": 4,
+          "name": "中村剛",
+          "position": "DH",
+          "recent3HitGames": 0,
+          "recent3Games": 1,
+          "recent3Avg": ".000",
+          "recent5Avg": ".000",
+          "avg": ".000",
+          "homeRuns": 0,
+          "rbi": 0
+        },
+        {
+          "order": 5,
+          "name": "渡部",
+          "position": "三",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".182",
+          "recent5Avg": ".167",
+          "avg": ".260",
+          "homeRuns": 7,
+          "rbi": 38,
+          "rispAvg": ".304"
+        },
+        {
+          "order": 6,
+          "name": "石井",
+          "position": "二",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".091",
+          "recent5Avg": ".111",
+          "avg": ".230",
+          "homeRuns": 5,
+          "rbi": 16,
+          "rispAvg": ".220"
+        },
+        {
+          "order": 7,
+          "name": "柘植",
+          "position": "捕",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".286",
+          "recent5Avg": ".286",
+          "avg": ".308",
+          "homeRuns": 1,
+          "rbi": 2
+        },
+        {
+          "order": 8,
+          "name": "若林",
+          "position": "中",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".125",
+          "recent5Avg": ".143",
+          "avg": ".143",
+          "homeRuns": 0,
+          "rbi": 0
+        },
+        {
+          "order": 9,
+          "name": "源田",
+          "position": "游",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".125",
+          "recent5Avg": ".182",
+          "avg": ".202",
+          "homeRuns": 1,
+          "rbi": 16,
+          "rispAvg": ".200"
+        }
+      ]
+    }
+  },
+  "situational": {
+    "awayPitcherAwayStarts": {
+      "pitcherName": "",
+      "gameCount": 0,
+      "allowedCounts": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0
+      }
+    },
+    "homePitcherHomeStarts": {
+      "pitcherName": "",
+      "gameCount": 0,
+      "allowedCounts": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0
+      }
+    },
+    "awayTeamAwayGames": {
+      "teamName": "福岡软银",
+      "gameCount": 10,
+      "scoredCounts": {
+        "1": 1,
+        "2": 1,
+        "3": 3,
+        "4": 6,
+        "5": 3,
+        "6": 5,
+        "7": 4,
+        "8": 2,
+        "9": 1
+      }
+    },
+    "homeTeamHomeGames": {
+      "teamName": "埼玉西武",
+      "gameCount": 10,
+      "scoredCounts": {
+        "1": 0,
+        "2": 3,
+        "3": 2,
+        "4": 3,
+        "5": 3,
+        "6": 2,
+        "7": 1,
+        "8": 3,
+        "9": 2
+      }
+    }
+  },
+  "cacheVersion": 18,
+  "cachedAt": "2026-08-08T17:53:33+00:00",
+  "nextRefreshAt": "2026-08-08T18:53:33+00:00",
+  "fromCache": true,
+  "refreshing": false
+}

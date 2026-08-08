@@ -1,0 +1,776 @@
+{
+  "focusTeamId": 4,
+  "matchup": {
+    "date": "2026-08-09",
+    "gameDate": "2026-08-09T18:00:00+09:00",
+    "status": "Scheduled",
+    "stadium": "横滨 18:00"
+  },
+  "away": {
+    "teamId": 4,
+    "teamName": "廣島東洋鯉",
+    "games": [
+      {
+        "date": "2026-08-07",
+        "opponent": "橫濱 DeNA",
+        "opponentStarter": "平良",
+        "isHome": false,
+        "teamScore": 1,
+        "opponentScore": 2,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-06",
+        "opponent": "讀賣巨人",
+        "opponentStarter": "又木",
+        "isHome": true,
+        "teamScore": 7,
+        "opponentScore": 11,
+        "firstInningRuns": 3,
+        "firstInningScored": true,
+        "firstFiveRuns": 6,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-08-05",
+        "opponent": "讀賣巨人",
+        "opponentStarter": "井上",
+        "isHome": true,
+        "teamScore": 0,
+        "opponentScore": 4,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-04",
+        "opponent": "讀賣巨人",
+        "opponentStarter": "山﨑",
+        "isHome": true,
+        "teamScore": 4,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-02",
+        "opponent": "中日龍",
+        "opponentStarter": "柳",
+        "isHome": true,
+        "teamScore": 4,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 2,
+        "over15": true,
+        "over25": false
+      },
+      {
+        "date": "2026-08-01",
+        "opponent": "中日龍",
+        "opponentStarter": "Mara",
+        "isHome": true,
+        "teamScore": 1,
+        "opponentScore": 7,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-31",
+        "opponent": "中日龍",
+        "opponentStarter": "髙橋宏",
+        "isHome": true,
+        "teamScore": 3,
+        "opponentScore": 1,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-26",
+        "opponent": "東京養樂多",
+        "opponentStarter": "吉村",
+        "isHome": false,
+        "teamScore": 4,
+        "opponentScore": 3,
+        "firstInningRuns": 2,
+        "firstInningScored": true,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-25",
+        "opponent": "東京養樂多",
+        "opponentStarter": "西舘",
+        "isHome": false,
+        "teamScore": 1,
+        "opponentScore": 2,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-24",
+        "opponent": "東京養樂多",
+        "opponentStarter": "高橋",
+        "isHome": false,
+        "teamScore": 3,
+        "opponentScore": 5,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      }
+    ],
+    "summary": {
+      "totalGames": 10,
+      "over15": 4,
+      "under15": 6,
+      "over25": 3,
+      "under25": 7,
+      "avgRuns": 1.6,
+      "firstInningScored": 2,
+      "firstInningNoScore": 8
+    },
+    "probablePitcher": null,
+    "pitcherAnalysis": null
+  },
+  "home": {
+    "teamId": 6,
+    "teamName": "橫濱 DeNA",
+    "games": [
+      {
+        "date": "2026-08-07",
+        "opponent": "廣島東洋鯉",
+        "opponentStarter": "森下",
+        "isHome": true,
+        "teamScore": 2,
+        "opponentScore": 1,
+        "firstInningRuns": 1,
+        "firstInningScored": true,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-06",
+        "opponent": "阪神虎",
+        "opponentStarter": "大竹",
+        "isHome": true,
+        "teamScore": 5,
+        "opponentScore": 10,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 2,
+        "over15": true,
+        "over25": false
+      },
+      {
+        "date": "2026-08-05",
+        "opponent": "阪神虎",
+        "opponentStarter": "髙橋",
+        "isHome": true,
+        "teamScore": 11,
+        "opponentScore": 7,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 6,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-08-04",
+        "opponent": "阪神虎",
+        "opponentStarter": "村上",
+        "isHome": true,
+        "teamScore": 1,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-02",
+        "opponent": "讀賣巨人",
+        "opponentStarter": "小笠原",
+        "isHome": false,
+        "teamScore": 2,
+        "opponentScore": 1,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-08-01",
+        "opponent": "讀賣巨人",
+        "opponentStarter": "竹丸",
+        "isHome": false,
+        "teamScore": 8,
+        "opponentScore": 7,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 8,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-31",
+        "opponent": "讀賣巨人",
+        "opponentStarter": "Hawa-Do",
+        "isHome": false,
+        "teamScore": 0,
+        "opponentScore": 6,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-26",
+        "opponent": "中日龍",
+        "opponentStarter": "金丸",
+        "isHome": false,
+        "teamScore": 1,
+        "opponentScore": 5,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false
+      },
+      {
+        "date": "2026-07-25",
+        "opponent": "中日龍",
+        "opponentStarter": "涌井",
+        "isHome": false,
+        "teamScore": 5,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true
+      },
+      {
+        "date": "2026-07-24",
+        "opponent": "中日龍",
+        "opponentStarter": "柳",
+        "isHome": false,
+        "teamScore": 2,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 2,
+        "over15": true,
+        "over25": false
+      }
+    ],
+    "summary": {
+      "totalGames": 10,
+      "over15": 5,
+      "under15": 5,
+      "over25": 3,
+      "under25": 7,
+      "avgRuns": 2.4,
+      "firstInningScored": 1,
+      "firstInningNoScore": 9
+    },
+    "probablePitcher": null,
+    "pitcherAnalysis": null
+  },
+  "aTable": {
+    "away": {
+      "teamName": "廣島東洋鯉",
+      "recent5": {
+        "gameCount": 5,
+        "scoredCounts": {
+          "1": 1,
+          "2": 0,
+          "3": 1,
+          "4": 2,
+          "5": 1,
+          "6": 0,
+          "7": 1,
+          "8": 3,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 3,
+          "2": 0,
+          "3": 2,
+          "4": 1,
+          "5": 1,
+          "6": 1,
+          "7": 2,
+          "8": 1,
+          "9": 2
+        }
+      },
+      "recent10": {
+        "gameCount": 10,
+        "scoredCounts": {
+          "1": 2,
+          "2": 0,
+          "3": 3,
+          "4": 2,
+          "5": 3,
+          "6": 0,
+          "7": 2,
+          "8": 4,
+          "9": 2
+        },
+        "allowedCounts": {
+          "1": 4,
+          "2": 1,
+          "3": 4,
+          "4": 2,
+          "5": 3,
+          "6": 2,
+          "7": 4,
+          "8": 2,
+          "9": 2
+        }
+      },
+      "recent20": {
+        "gameCount": 20,
+        "scoredCounts": {
+          "1": 5,
+          "2": 2,
+          "3": 3,
+          "4": 3,
+          "5": 5,
+          "6": 5,
+          "7": 2,
+          "8": 7,
+          "9": 4
+        },
+        "allowedCounts": {
+          "1": 9,
+          "2": 2,
+          "3": 4,
+          "4": 5,
+          "5": 9,
+          "6": 3,
+          "7": 7,
+          "8": 3,
+          "9": 3
+        }
+      }
+    },
+    "home": {
+      "teamName": "橫濱 DeNA",
+      "recent5": {
+        "gameCount": 5,
+        "scoredCounts": {
+          "1": 1,
+          "2": 1,
+          "3": 2,
+          "4": 2,
+          "5": 0,
+          "6": 4,
+          "7": 1,
+          "8": 1,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 1,
+          "2": 2,
+          "3": 1,
+          "4": 1,
+          "5": 0,
+          "6": 1,
+          "7": 1,
+          "8": 1,
+          "9": 1
+        }
+      },
+      "recent10": {
+        "gameCount": 10,
+        "scoredCounts": {
+          "1": 1,
+          "2": 3,
+          "3": 3,
+          "4": 5,
+          "5": 1,
+          "6": 4,
+          "7": 2,
+          "8": 1,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 2,
+          "2": 2,
+          "3": 2,
+          "4": 1,
+          "5": 1,
+          "6": 4,
+          "7": 1,
+          "8": 3,
+          "9": 1
+        }
+      },
+      "recent20": {
+        "gameCount": 20,
+        "scoredCounts": {
+          "1": 5,
+          "2": 5,
+          "3": 5,
+          "4": 7,
+          "5": 8,
+          "6": 8,
+          "7": 5,
+          "8": 3,
+          "9": 2
+        },
+        "allowedCounts": {
+          "1": 6,
+          "2": 2,
+          "3": 4,
+          "4": 3,
+          "5": 2,
+          "6": 7,
+          "7": 3,
+          "8": 4,
+          "9": 1
+        }
+      }
+    }
+  },
+  "startingLineups": {
+    "logicVersion": 7,
+    "away": {
+      "teamName": "廣島東洋鯉",
+      "source": "previous",
+      "sourceDate": "2026-08-07",
+      "opposingPitcher": null,
+      "batters": [
+        {
+          "order": 1,
+          "name": "秋山",
+          "position": "中",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".444",
+          "recent5Avg": ".412",
+          "avg": ".293",
+          "homeRuns": 3,
+          "rbi": 11
+        },
+        {
+          "order": 2,
+          "name": "勝田",
+          "position": "二",
+          "recent3HitGames": 0,
+          "recent3Games": 3,
+          "recent3Avg": ".000",
+          "recent5Avg": ".000",
+          "avg": ".158",
+          "homeRuns": 0,
+          "rbi": 4
+        },
+        {
+          "order": 3,
+          "name": "Fabian",
+          "position": "左",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".308",
+          "recent5Avg": ".348",
+          "avg": ".233",
+          "homeRuns": 14,
+          "rbi": 31,
+          "rispAvg": ".195"
+        },
+        {
+          "order": 4,
+          "name": "坂倉",
+          "position": "三",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".111",
+          "recent5Avg": ".278",
+          "avg": ".255",
+          "homeRuns": 10,
+          "rbi": 48,
+          "rispAvg": ".333"
+        },
+        {
+          "order": 5,
+          "name": "小園",
+          "position": "游",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".500",
+          "recent5Avg": ".381",
+          "avg": ".254",
+          "homeRuns": 1,
+          "rbi": 23,
+          "rispAvg": ".261"
+        },
+        {
+          "order": 6,
+          "name": "佐々木",
+          "position": "右",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".333",
+          "recent5Avg": ".350",
+          "avg": ".258",
+          "homeRuns": 3,
+          "rbi": 10,
+          "rispAvg": ".174"
+        },
+        {
+          "order": 7,
+          "name": "Montero",
+          "position": "一",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".222",
+          "recent5Avg": ".273",
+          "avg": ".256",
+          "homeRuns": 9,
+          "rbi": 34,
+          "rispAvg": ".316"
+        },
+        {
+          "order": 8,
+          "name": "石原",
+          "position": "捕",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".125",
+          "recent5Avg": ".077",
+          "avg": ".205",
+          "homeRuns": 1,
+          "rbi": 5
+        },
+        {
+          "order": 9,
+          "name": "森下",
+          "position": "P",
+          "recent3HitGames": 1,
+          "recent3Games": 1,
+          "recent3Avg": ".333",
+          "recent5Avg": ".333",
+          "avg": ".211",
+          "homeRuns": 0,
+          "rbi": 1
+        }
+      ]
+    },
+    "home": {
+      "teamName": "橫濱 DeNA",
+      "source": "previous",
+      "sourceDate": "2026-08-07",
+      "opposingPitcher": null,
+      "batters": [
+        {
+          "order": 1,
+          "name": "度会",
+          "position": "左",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".333",
+          "recent5Avg": ".250",
+          "avg": ".276",
+          "homeRuns": 6,
+          "rbi": 33,
+          "rispAvg": ".314"
+        },
+        {
+          "order": 2,
+          "name": "牧",
+          "position": "二",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".182",
+          "recent5Avg": ".235",
+          "avg": ".285",
+          "homeRuns": 18,
+          "rbi": 47,
+          "rispAvg": ".462"
+        },
+        {
+          "order": 3,
+          "name": "筒香",
+          "position": "一",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".167",
+          "recent5Avg": ".250",
+          "avg": ".235",
+          "homeRuns": 9,
+          "rbi": 29,
+          "rispAvg": ".300"
+        },
+        {
+          "order": 4,
+          "name": "Encarnacion",
+          "position": "右",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".364",
+          "recent5Avg": ".294",
+          "avg": ".305",
+          "homeRuns": 6,
+          "rbi": 26
+        },
+        {
+          "order": 5,
+          "name": "宮﨑",
+          "position": "三",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".400",
+          "recent5Avg": ".294",
+          "avg": ".272",
+          "homeRuns": 8,
+          "rbi": 29,
+          "rispAvg": ".241"
+        },
+        {
+          "order": 6,
+          "name": "松尾",
+          "position": "捕",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".333",
+          "recent5Avg": ".263",
+          "avg": ".257",
+          "homeRuns": 4,
+          "rbi": 14,
+          "rispAvg": ".182"
+        },
+        {
+          "order": 7,
+          "name": "勝又",
+          "position": "中",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".400",
+          "recent5Avg": ".250",
+          "avg": ".305",
+          "homeRuns": 3,
+          "rbi": 32,
+          "rispAvg": ".286"
+        },
+        {
+          "order": 8,
+          "name": "宮下",
+          "position": "游",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".400",
+          "recent5Avg": ".353",
+          "avg": ".250",
+          "homeRuns": 5,
+          "rbi": 18
+        },
+        {
+          "order": 9,
+          "name": "平良",
+          "position": "P",
+          "recent3HitGames": 0,
+          "recent3Games": 2,
+          "recent3Avg": ".000",
+          "recent5Avg": ".000",
+          "avg": ".000",
+          "homeRuns": 0,
+          "rbi": 0
+        }
+      ]
+    }
+  },
+  "situational": {
+    "awayPitcherAwayStarts": {
+      "pitcherName": "",
+      "gameCount": 0,
+      "allowedCounts": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0
+      }
+    },
+    "homePitcherHomeStarts": {
+      "pitcherName": "",
+      "gameCount": 0,
+      "allowedCounts": {
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0
+      }
+    },
+    "awayTeamAwayGames": {
+      "teamName": "廣島東洋鯉",
+      "gameCount": 10,
+      "scoredCounts": {
+        "1": 2,
+        "2": 1,
+        "3": 2,
+        "4": 2,
+        "5": 2,
+        "6": 3,
+        "7": 0,
+        "8": 2,
+        "9": 4
+      }
+    },
+    "homeTeamHomeGames": {
+      "teamName": "橫濱 DeNA",
+      "gameCount": 10,
+      "scoredCounts": {
+        "1": 4,
+        "2": 4,
+        "3": 4,
+        "4": 3,
+        "5": 4,
+        "6": 7,
+        "7": 4,
+        "8": 2,
+        "9": 0
+      }
+    }
+  },
+  "cacheVersion": 18,
+  "cachedAt": "2026-08-08T17:52:47+00:00",
+  "nextRefreshAt": "2026-08-08T18:52:47+00:00",
+  "fromCache": true,
+  "refreshing": false
+}
