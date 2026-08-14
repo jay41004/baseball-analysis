@@ -76,22 +76,53 @@ window.LineupLoader = (function () {
     poll();
   }
 
-  function ensureLineups(lineups, { apiPath, teamId, games, fetchWithTimeout, force = false } = {}) {
-    if (!force && lineupsReady(lineups)) {
+  function ensureLineups(
+    lineups,
+    { apiPath, league, teamId, games, fetchWithTimeout, force = false, matchup = null } = {}
+  ) {
+    const needsLive =
+      force || (SiteConfig.lineupsNeedLiveRefresh && SiteConfig.lineupsNeedLiveRefresh(lineups, matchup));
+    const useLiveOnStatic =
+      SiteConfig.isStatic &&
+      league &&
+      needsLive &&
+      typeof fetchWithTimeout === "function";
+    const effectiveApiPath = useLiveOnStatic
+      ? SiteConfig.liveLineupApi(league)
+      : SiteConfig.isStatic
+        ? null
+        : apiPath;
+
+    if (!force && lineupsReady(lineups) && !needsLive) {
       lastGoodLineups = lineups;
       syncLineup(lineups);
       clearLineupPollTimer();
       return;
     }
 
-    if (!force && lineupsReady(lastGoodLineups)) {
+    if (lineupsReady(lineups)) {
+      lastGoodLineups = lineups;
+      syncLineup(lineups);
+    } else if (lineupsReady(lastGoodLineups)) {
       syncLineup(lastGoodLineups);
     } else {
-      showLineupLoading(force ? "正在重抓先發打線…" : "打線載入中…（約 30～60 秒）");
+      showLineupLoading(
+        useLiveOnStatic
+          ? "正在向雲端抓取最新先發打線…（約 30～90 秒）"
+          : force
+            ? "正在重抓先發打線…"
+            : "打線載入中…（約 30～60 秒）"
+      );
     }
 
-    if (apiPath && teamId && typeof fetchWithTimeout === "function" && !window.SiteConfig?.isStatic) {
-      fetchLineupsWhenReady({ apiPath, teamId, games, fetchWithTimeout, force });
+    if (effectiveApiPath && teamId && typeof fetchWithTimeout === "function") {
+      fetchLineupsWhenReady({
+        apiPath: effectiveApiPath,
+        teamId,
+        games,
+        fetchWithTimeout,
+        force: force || needsLive,
+      });
     }
   }
 

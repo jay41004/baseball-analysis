@@ -187,6 +187,20 @@ function formatScoredInnings(game) {
   return `<span class="scored-innings">${scoredInnings.join("、")} 局</span>`;
 }
 
+function formatTeamScoredInnings(game) {
+  let innings = [];
+  if (game.scoredInnings?.length) innings = game.scoredInnings;
+  else if (game.runsByInning?.length) {
+    innings = game.runsByInning
+      .map((runs, index) => (runs > 0 ? index + 1 : null))
+      .filter(Boolean);
+  }
+  if (!innings.length) {
+    return '<span class="muted-text">—</span>';
+  }
+  return `<span class="scored-innings team-scored">${innings.join("、")} 局</span>`;
+}
+
 function buildInningScoredCounts(summary, games) {
   const raw = summary?.inningScoredCounts;
   if (raw && Object.values(raw).some((value) => value > 0)) {
@@ -312,6 +326,7 @@ function teamGamesTable(games, scrollKey = "team-games") {
             <th class="col-match">日期 / 對手</th>
             <th class="col-score">比分</th>
             <th class="col-num"><span class="th-full">1局得分</span><span class="th-short">1局</span></th>
+            <th class="col-innings"><span class="th-full">得分局數</span><span class="th-short">得分局</span></th>
             <th class="col-num"><span class="th-full">1–5 得分</span><span class="th-short">1-5</span></th>
             <th class="col-ou">1.5</th>
             <th class="col-ou">2.5</th>
@@ -325,6 +340,7 @@ function teamGamesTable(games, scrollKey = "team-games") {
               <td class="col-match">${formatMatchCell(game)}</td>
               <td class="col-score">${formatFinalScore(game)}</td>
               <td class="col-num">${teamFirstInningBadge(game.firstInningScored)}</td>
+              <td class="col-innings">${formatTeamScoredInnings(game)}</td>
               <td class="col-num runs">${game.firstFiveRuns}</td>
               <td class="col-ou">${ouBadge(game.over15)}</td>
               <td class="col-ou">${ouBadge(game.over25)}</td>

@@ -653,6 +653,18 @@ td {
   font-weight: 600;
 }
 
+.scored-innings.team-scored {
+  color: var(--over);
+}
+
+table.data-table .col-innings {
+  width: 16%;
+  padding: 4px 4px;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.25;
+}
+
 .muted-text {
   color: var(--muted);
 }
@@ -976,6 +988,12 @@ table.data-table.a-table .col-allowed-start {
   table.data-table.games-table .col-num {
     width: auto;
     min-width: 2.6rem;
+  }
+
+  table.data-table.games-table .col-innings {
+    width: auto;
+    min-width: 4.4rem;
+    max-width: 7.2rem;
   }
 
   table.data-table.games-table .col-ou {
