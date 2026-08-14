@@ -669,7 +669,7 @@ def _lineup_orders_unique(batters: list[dict[str, Any]]) -> bool:
 
 
 # Bump when firstSno dedupe / order rules change so cached cards rebuild.
-CPBL_LINEUP_LOGIC_VERSION = 2
+CPBL_LINEUP_LOGIC_VERSION = 3
 
 
 def cpbl_lineups_need_rebuild(
@@ -1003,6 +1003,10 @@ def _enrich_batters_with_season_stats(
             avg_text = format_avg(season.get("avg"))
             if avg_text:
                 copy["avg"] = avg_text
+
+            obp_text = format_avg(season.get("obp"))
+            if obp_text:
+                copy["obp"] = obp_text
 
             ops_text = format_ops(season.get("ops"))
             if ops_text:

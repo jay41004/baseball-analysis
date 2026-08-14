@@ -339,6 +339,11 @@ function teamGamesTable(games, scrollKey = "team-games") {
   `;
 }
 
+function formatInningsPitched(value) {
+  if (value == null || value === "") return "—";
+  return String(value);
+}
+
 function pitcherGamesTable(games, scrollKey = "pitcher-games") {
   if (!games.length) return `<p class="empty-note">尚無先發數據</p>`;
   return `
@@ -348,6 +353,7 @@ function pitcherGamesTable(games, scrollKey = "pitcher-games") {
           <tr>
             <th class="col-match">日期 / 對手</th>
             <th class="col-score">比分</th>
+            <th class="col-num"><span class="th-full">先發局數</span><span class="th-short">局數</span></th>
             <th class="col-num"><span class="th-full">掉分局數</span><span class="th-short">掉分局</span></th>
             <th class="col-num"><span class="th-full">1局掉分</span><span class="th-short">1局</span></th>
             <th class="col-num"><span class="th-full">1–5 失分</span><span class="th-short">1-5</span></th>
@@ -362,6 +368,7 @@ function pitcherGamesTable(games, scrollKey = "pitcher-games") {
             <tr>
               <td class="col-match">${formatMatchCell(game)}</td>
               <td class="col-score">${formatFinalScore(game)}</td>
+              <td class="col-num">${formatInningsPitched(game.inningsPitched)}</td>
               <td class="col-num">${formatScoredInnings(game)}</td>
               <td class="col-num">${inningScoredBadge(game.firstInningScored)}</td>
               <td class="col-num runs">${game.firstFiveRunsAllowed}</td>
@@ -377,7 +384,7 @@ function pitcherGamesTable(games, scrollKey = "pitcher-games") {
   `;
 }
 
-function renderSideColumn(side, role) {
+function renderSideColumn(side, role, { refreshing = false } = {}) {
   const isAway = role === "客隊";
   const pitcherName = side.probablePitcher?.fullName ?? "尚未公布";
   const pitcher = side.pitcherAnalysis;
@@ -388,6 +395,12 @@ function renderSideColumn(side, role) {
   const teamClass = isAway ? "team-name-away" : "team-name-home";
   const pitcherClass = isAway ? "pitcher-name-away" : "pitcher-name-home";
   const pitcherMuted = pitcherName === "尚未公布" ? " muted" : ` ${pitcherClass}`;
+  const pitcherEmpty =
+    pitcherName === "尚未公布"
+      ? "NPB 尚未公布先發投手"
+      : refreshing
+        ? "先發數據更新中…"
+        : "找不到此投手近期先發數據";
 
   return `
     <article class="team-column ${isAway ? "away-column" : "home-column"}">
@@ -410,7 +423,7 @@ function renderSideColumn(side, role) {
         ${
           pitcher && pitcher.games.length
             ? `${pitcherSummaryCards(pitcher.summary, pitcher.games)}${pitcherGamesTable(pitcher.games, isAway ? "away-pitcher-games" : "home-pitcher-games")}`
-            : `<p class="empty-note">${pitcherName === "尚未公布" ? "NPB 尚未公布先發投手" : "找不到此投手近期先發數據"}</p>`
+            : `<p class="empty-note">${pitcherEmpty}</p>`
         }
       </section>
     </article>
@@ -436,10 +449,11 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
 
   const { away, home } = data;
   updateMatchupHeader(data);
+  const refreshing = Boolean(data.refreshing);
 
   matchupGridEl.innerHTML = `
-    ${renderSideColumn(away, "客隊")}
-    ${renderSideColumn(home, "主隊")}
+    ${renderSideColumn(away, "客隊", { refreshing })}
+    ${renderSideColumn(home, "主隊", { refreshing })}
   `;
 
   renderSituationalSection(data.situational);
@@ -555,7 +569,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
 
   try {
     if (force && SiteConfig.isStatic) {
-      cacheStatusEl.textContent = "靜態網站：資料隨更新部署，無法即時刷新";
+      cacheStatusEl.textContent = "靜態資料隨部署更新；正在向雲端抓取最新先發打線…";
     }
 
     const url = SiteConfig.npbMatchup(teamId, games, force && !SiteConfig.isStatic);
@@ -585,10 +599,12 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       const missingRisp = bats.length === 0 || bats.every((b) => b.rispAvg == null);
       LineupLoader.ensureLineups(data.startingLineups, {
         apiPath: SiteConfig.api("/api/npb"),
+        league: "npb",
         teamId,
         games,
         fetchWithTimeout,
         force: force || missingRisp,
+        matchup: data.matchup,
       });
       syncATable(SiteConfig.api("/api/npb"), teamId, data.aTable, { force, matchReady: true });
     }

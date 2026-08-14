@@ -7,6 +7,8 @@ on:
   schedule:
     # Every 2 hours (UTC). Taiwan ≈ UTC+8 → even hours local.
     - cron: "15 */2 * * *"
+    # Game-day window TW 16:00–24:00 ≈ UTC 08:00–16:00 — hourly lineup refresh
+    - cron: "5 8-15 * * *"
   workflow_dispatch:
   push:
     branches: [main]

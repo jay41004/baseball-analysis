@@ -6,6 +6,7 @@ window.SiteConfig = (function () {
   // Static dump is the independent phone path — no Render free-tier dependency.
   const isStatic = isGhPages || window.SITE_STATIC === true;
   const useLiveApi = !isStatic && window.SITE_LIVE === true;
+  const liveApiRoot = "https://baseball-analysis.onrender.com";
   const parts = location.pathname.split("/").filter(Boolean);
   const repo = isGhPages && parts.length ? parts[0] : "";
   const base = repo ? `/${repo}` : "";
@@ -24,6 +25,7 @@ window.SiteConfig = (function () {
     isStatic,
     isGhPages,
     useLiveApi,
+    liveApiRoot,
     apiRoot,
     base,
     dataUrl,
@@ -57,6 +59,40 @@ window.SiteConfig = (function () {
     },
     meta() {
       return isStatic ? `${base}/data/meta.json` : api("/api/meta");
+    },
+    /** Render live API for lineup-only refresh on static GitHub Pages. */
+    liveLineupApi(league) {
+      return `${liveApiRoot}/api/${league}`;
+    },
+    /** True when static snapshot lineups should be upgraded from Render. */
+    lineupsNeedLiveRefresh(lineups, matchup) {
+      if (!matchup?.date) return false;
+      const gameDate = String(matchup.date).slice(0, 10);
+      const status = String(matchup.status || "")
+        .trim()
+        .toLowerCase();
+      const away = lineups?.away?.batters?.length ?? 0;
+      const home = lineups?.home?.batters?.length ?? 0;
+      if (!away && !home) return true;
+      if (status === "final") return false;
+      for (const side of ["away", "home"]) {
+        const sideData = lineups?.[side] || {};
+        const count = sideData.batters?.length ?? 0;
+        if (!count) continue;
+        const sourceDate = String(sideData.sourceDate || "").slice(0, 10);
+        const source = String(sideData.source || "")
+          .trim()
+          .toLowerCase();
+        if (sourceDate && sourceDate !== gameDate) return true;
+        if (
+          source !== "confirmed" &&
+          sourceDate === gameDate &&
+          ["scheduled", "live", "in progress", "preview", "warmup", ""].includes(status)
+        ) {
+          return true;
+        }
+      }
+      return false;
     },
   };
 })();
@@ -160,8 +196,9 @@ window.ApiUtils = (function () {
 window.TableScroll = (function () {
   let interactingUntil = 0;
   let bound = false;
+  let lastPositions = {};
 
-  function markInteracting(ms = 1500) {
+  function markInteracting(ms = 2500) {
     interactingUntil = Date.now() + ms;
   }
 
@@ -175,15 +212,18 @@ window.TableScroll = (function () {
       const key = el.dataset.scrollKey || `idx:${index}`;
       map[key] = el.scrollLeft;
     });
+    lastPositions = { ...lastPositions, ...map };
     return map;
   }
 
   function restore(map) {
-    if (!map) return;
+    const merged = { ...lastPositions, ...(map || {}) };
+    lastPositions = merged;
+    if (!Object.keys(merged).length) return;
     const apply = () => {
       document.querySelectorAll(".table-wrap").forEach((el, index) => {
         const key = el.dataset.scrollKey || `idx:${index}`;
-        if (map[key] != null) el.scrollLeft = map[key];
+        if (merged[key] != null) el.scrollLeft = merged[key];
       });
     };
     apply();
@@ -221,7 +261,15 @@ window.TableScroll = (function () {
     document.addEventListener(
       "scroll",
       (event) => {
-        if (event.target?.classList?.contains("table-wrap")) mark();
+        const wrap = event.target?.classList?.contains("table-wrap")
+          ? event.target
+          : event.target?.closest?.(".table-wrap");
+        if (!wrap) return;
+        mark();
+        const key =
+          wrap.dataset.scrollKey ||
+          `idx:${[...document.querySelectorAll(".table-wrap")].indexOf(wrap)}`;
+        lastPositions[key] = wrap.scrollLeft;
       },
       { passive: true, capture: true }
     );

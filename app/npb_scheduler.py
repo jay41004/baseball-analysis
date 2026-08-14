@@ -139,8 +139,13 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
             src = matchup[side]
             panel["teamId"] = src["teamId"]
             panel["teamName"] = src.get("teamName") or src.get("nameZh") or panel.get("teamName")
-            if src.get("probablePitcher"):
-                panel["probablePitcher"] = src["probablePitcher"]
+            new_pitcher = src.get("probablePitcher")
+            new_name = (new_pitcher or {}).get("fullName") or ""
+            old_name = ((panel.get("probablePitcher") or {}).get("fullName") or "")
+            if new_pitcher and new_name:
+                panel["probablePitcher"] = new_pitcher
+                if old_name and old_name != new_name:
+                    panel.pop("pitcherAnalysis", None)
             data[side] = panel
     else:
         empty_summary = {
@@ -165,6 +170,25 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         data["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
         data.pop("aTable", None)
         data.pop("situational", None)
+
+    def _name(panel: dict | None) -> str:
+        return ((panel or {}).get("probablePitcher") or {}).get("fullName") or ""
+
+    has_starter = any(_name(data.get(side)) for side in ("away", "home"))
+    needs_analysis = any(
+        _name(data.get(side))
+        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
+        for side in ("away", "home")
+    )
+    if needs_analysis and has_starter:
+        try:
+            from app.npb_service import rebuild_pitcher_dependent_fields
+
+            data = await rebuild_pitcher_dependent_fields(data, game_count=games)
+        except Exception:
+            logger.exception(
+                "NPB pitcher rebuild failed for team %s (header kept)", team_id
+            )
 
     await store_matchup(team_id, games, data)
     logger.info("Refreshed NPB matchup header for team %s", team_id)

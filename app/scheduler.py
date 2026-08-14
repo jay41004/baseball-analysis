@@ -76,12 +76,12 @@ async def ensure_a_table(team_id: int, *, force: bool = False) -> dict[str, Any]
 
 
 async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> None:
-    """Cloud-safe refresh: update next-game header via one MLB schedule call."""
+    """Update next-game header; rebuild pitcher blocks when starter missing/changed."""
     import copy
 
     import httpx
 
-    from app.mlb_service import fetch_next_matchup
+    from app.mlb_service import fetch_next_matchup, rebuild_pitcher_dependent_fields
     from app.pages_mirror import seed_matchup_from_pages
 
     cached = get_matchup(team_id, games)
@@ -103,6 +103,12 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
     old_home = int((data.get("home") or {}).get("teamId") or 0)
     new_away = int(matchup["away"]["teamId"])
     new_home = int(matchup["home"]["teamId"])
+    old_pk = (data.get("matchup") or {}).get("gamePk")
+    new_pk = matchup.get("gamePk")
+    game_changed = old_pk is not None and new_pk is not None and old_pk != new_pk
+
+    def _name(panel: dict | None) -> str:
+        return ((panel or {}).get("probablePitcher") or {}).get("fullName") or ""
 
     data["matchup"] = {
         "date": matchup.get("date"),
@@ -119,11 +125,20 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
             src = matchup[side]
             panel["teamId"] = src["teamId"]
             panel["teamName"] = src["teamName"]
-            if src.get("probablePitcher"):
-                panel["probablePitcher"] = src["probablePitcher"]
+            new_pitcher = src.get("probablePitcher")
+            new_name = (new_pitcher or {}).get("fullName") or ""
+            old_name = _name(panel)
+            if game_changed:
+                panel["probablePitcher"] = new_pitcher
+                if old_name != new_name:
+                    panel.pop("pitcherAnalysis", None)
+            elif new_pitcher and new_name:
+                panel["probablePitcher"] = new_pitcher
+                if old_name and new_name and old_name != new_name:
+                    panel.pop("pitcherAnalysis", None)
             data[side] = panel
     else:
-        # Opponents changed — keep site alive with correct header; drop stale panels.
+        # Opponents changed — keep correct header; drop stale panels.
         empty_summary = {
             "totalGames": 0,
             "over15": 0,
@@ -146,6 +161,21 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         data["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
         data.pop("aTable", None)
         data.pop("situational", None)
+
+    has_starter = any(_name(data.get(side)) for side in ("away", "home"))
+    needs_analysis = any(
+        _name(data.get(side))
+        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
+        for side in ("away", "home")
+    )
+
+    if needs_analysis and has_starter:
+        try:
+            data = await rebuild_pitcher_dependent_fields(data, game_count=games)
+        except Exception:
+            logger.exception(
+                "MLB pitcher rebuild failed for team %s (header kept)", team_id
+            )
 
     await store_matchup(team_id, games, data)
     logger.info("Refreshed MLB matchup header for team %s", team_id)

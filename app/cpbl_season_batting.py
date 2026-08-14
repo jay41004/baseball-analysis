@@ -71,6 +71,7 @@ def _finalize_player(totals: dict[str, int]) -> dict[str, Any]:
         "homeRuns": int(totals.get("hr") or 0),
         "rbi": int(totals.get("rbi") or 0),
         "avg": round(avg, 3),
+        "obp": round(obp, 3),
         "ops": round(obp + slg, 3),
     }
 

@@ -104,6 +104,7 @@ def _parse_team_batting_page(html: str, *, team_code: str, team_id: int) -> list
         if not name or name == "選手":
             continue
         avg = _parse_avg(cells[20])
+        obp = _parse_avg(cells[22]) if len(cells) > 22 else None
         hr = _parse_int(cells[8])
         rbi = _parse_int(cells[10])
         at_bats = _parse_int(cells[3])
@@ -115,6 +116,7 @@ def _parse_team_batting_page(html: str, *, team_code: str, team_id: int) -> list
                 "teamCode": team_code,
                 "teamId": team_id,
                 "avg": avg,
+                "obp": obp,
                 "homeRuns": hr,
                 "rbi": rbi,
                 "atBats": at_bats,
@@ -297,6 +299,8 @@ def season_fields_for_batter(
     fields: dict[str, Any] = {}
     if player.get("avg") is not None:
         fields["avg"] = player["avg"]
+    if player.get("obp") is not None:
+        fields["obp"] = player["obp"]
     if player.get("homeRuns") is not None:
         fields["homeRuns"] = player["homeRuns"]
     if player.get("rbi") is not None:

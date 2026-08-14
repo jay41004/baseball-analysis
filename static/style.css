@@ -459,6 +459,7 @@ button:hover {
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   /* Allow vertical page scroll when finger is on a wide table. */
   touch-action: pan-x pan-y;
@@ -728,6 +729,7 @@ td {
   overflow-y: hidden;
   max-width: 100%;
   overscroll-behavior-x: contain;
+  overflow-anchor: none;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
   scrollbar-width: thin;

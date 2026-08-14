@@ -53,6 +53,39 @@ function pitcherNote(side) {
   return name ? `對手投手：${name}` : "";
 }
 
+function lineupFingerprint(lineups) {
+  try {
+    return JSON.stringify({
+      a: (lineups?.away?.batters || []).map((b) => [
+        b.order,
+        b.name,
+        b.avg,
+        b.rbi,
+        b.rispAvg,
+        b.recent3Avg,
+        b.vsPitcherSeasonAvg,
+      ]),
+      h: (lineups?.home?.batters || []).map((b) => [
+        b.order,
+        b.name,
+        b.avg,
+        b.rbi,
+        b.rispAvg,
+        b.recent3Avg,
+        b.vsPitcherSeasonAvg,
+      ]),
+      as: lineups?.away?.source,
+      hs: lineups?.home?.source,
+      ap: lineups?.away?.opposingPitcher?.fullName,
+      hp: lineups?.home?.opposingPitcher?.fullName,
+    });
+  } catch {
+    return String(Date.now());
+  }
+}
+
+let lastLineupFingerprint = "";
+
 function renderLineupBlock(side, roleLabel) {
   if (!side?.batters?.length) {
     return `<p class="empty-note">${roleLabel} · ${side?.teamName ?? "—"}：尚無打線資料</p>`;
@@ -63,10 +96,11 @@ function renderLineupBlock(side, roleLabel) {
       (batter) => `
         <tr>
           <td class="col-name">${batterLabel(batter)}</td>
+          <td class="col-stat">${formatStat(batter.rbi)}</td>
           <td class="col-stat">${formatStat(batter.avg)}</td>
+          <td class="col-stat">${formatStat(batter.obp)}</td>
           <td class="col-stat">${formatRisp(batter)}</td>
           <td class="col-stat">${formatStat(batter.homeRuns)}</td>
-          <td class="col-stat">${formatStat(batter.rbi)}</td>
           <td class="col-stat">${formatStat(batter.vsPitcherSeasonAvg)}</td>
           <td class="col-stat">${formatStat(batter.vsPitcherCareerAvg)}</td>
           <td class="col-stat">${formatRecentHits(batter)}</td>
@@ -88,10 +122,11 @@ function renderLineupBlock(side, roleLabel) {
           <thead>
             <tr>
               <th class="col-name">打者</th>
+              <th class="col-stat">打點</th>
               <th class="col-stat">打擊率</th>
+              <th class="col-stat">上壘率</th>
               <th class="col-stat">得點圈<br>打擊率</th>
               <th class="col-stat">全壘打</th>
-              <th class="col-stat">打點</th>
               <th class="col-stat">對投手<br>今年</th>
               <th class="col-stat">對投手<br>生涯</th>
               <th class="col-stat">近3<br>安打</th>
@@ -113,7 +148,7 @@ function renderLineupSection(lineups) {
   return `
     <details class="lineup-section card" open>
       <summary class="lineup-summary">先發打線 · 本季成績</summary>
-      <p class="lineup-note">若本場尚未公布先發，顯示該隊上一場比賽的先發打序。打擊率／得點圈／全壘打／打點：MLB、NPB 皆為本季（NPB 得點圈取自整季統計）；對投手成績為對本場先發投手（有公布先發時）；近3安打 = 近3場有安打的場數。</p>
+      <p class="lineup-note">若本場尚未公布先發，顯示該隊上一場比賽的先發打序。打點／打擊率／上壘率／得點圈／全壘打：MLB、NPB 皆為本季（NPB 得點圈取自整季統計）；對投手成績為對本場先發投手（有公布先發時）；近3安打 = 近3場有安打的場數。</p>
       <div class="lineup-grid">
         ${awayBlock}
         ${homeBlock}
@@ -125,7 +160,21 @@ function renderLineupSection(lineups) {
 function paintLineup(lineups) {
   const root = document.getElementById("lineup-root");
   if (!root) return;
+
+  const fingerprint = lineupFingerprint(lineups);
+  if (fingerprint && fingerprint === lastLineupFingerprint && root.querySelector(".lineup-section")) {
+    return;
+  }
+
+  // While user is scrolling lineup tables, keep the current DOM.
+  if (window.TableScroll?.isInteracting?.() && root.querySelector(".table-wrap")) {
+    return;
+  }
+
+  const scrollMap = window.TableScroll ? TableScroll.capture() : {};
   root.innerHTML = renderLineupSection(lineups || {});
+  lastLineupFingerprint = fingerprint;
+  if (window.TableScroll) TableScroll.restore(scrollMap);
 }
 
 function syncLineup(lineups) {

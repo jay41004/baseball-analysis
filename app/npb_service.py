@@ -28,6 +28,7 @@ STARTER_RE = re.compile(r"先発[：:]\s*([^\s先発]+)")
 PROBABLE_RE = re.compile(r"(?:\(予\)|先発[：:])\s*([^\s(先発]+)")
 PBP_STARTER_RE = re.compile(r"（先発投手）(.+?)(?:\s|$|（|）)")
 PBP_CHANGE_RE = re.compile(r"（投手交代）(.+?)→(.+?)(?:\s|$|（|）)")
+PBP_OUTS_RE = re.compile(r"(\d)\s*アウト")
 PBP_RBI_RE = re.compile(r"打点(\d+)")
 PBP_BATTER_NAME_RE = re.compile(
     r"^\dアウト(?:\s+(?:満塁|(?:\d+(?:・\d+)*)塁))*\s+(\S+)\s+\d-\d"
@@ -392,18 +393,26 @@ def _defensive_half_label(is_home: bool) -> str:
     return "表" if is_home else "裏"
 
 
+def _format_innings_pitched(outs: int) -> str | None:
+    if outs <= 0:
+        return None
+    whole, rem = divmod(outs, 3)
+    return f"{whole}.{rem}"
+
+
 def _parse_pitcher_runs_from_playbyplay(
     html: str,
     is_home: bool,
     pitcher_name: str,
     opp_innings: list[int] | None = None,
-) -> list[int]:
-    """Runs allowed by pitcher in each inning (index 0 = inning 1) from npb.jp play-by-play."""
+) -> tuple[list[int], str | None]:
+    """Runs by inning + estimated IP (from outs) for one pitcher from npb.jp play-by-play."""
     soup = BeautifulSoup(html, "html.parser")
     defend_half = _defensive_half_label(is_home)
     runs = [0] * 9
     current_pitcher: str | None = None
     opp = opponent_runs_by_inning(opp_innings or [])
+    outs_recorded = 0
 
     for heading in soup.find_all("h5"):
         title = heading.get_text(strip=True)
@@ -416,6 +425,8 @@ def _parse_pitcher_runs_from_playbyplay(
             continue
 
         half_had_change = False
+        prev_outs: int | None = None
+        pitcher_at_prev: str | None = None
         for element in heading.find_all_next(["tr", "h5"]):
             if element.name == "h5":
                 break
@@ -423,9 +434,22 @@ def _parse_pitcher_runs_from_playbyplay(
             if not row:
                 continue
 
+            outs_match = PBP_OUTS_RE.search(row)
+            outs_before = int(outs_match.group(1)) if outs_match else None
+            if (
+                outs_before is not None
+                and prev_outs is not None
+                and pitcher_at_prev
+                and _pitcher_name_matches(pitcher_name, pitcher_at_prev)
+            ):
+                if outs_before > prev_outs:
+                    outs_recorded += outs_before - prev_outs
+
             starter = PBP_STARTER_RE.search(row)
             if starter:
                 current_pitcher = starter.group(1).strip()
+                prev_outs = outs_before if outs_before is not None else prev_outs
+                pitcher_at_prev = current_pitcher
                 continue
 
             change = PBP_CHANGE_RE.search(row)
@@ -436,10 +460,25 @@ def _parse_pitcher_runs_from_playbyplay(
                 if current_pitcher and _pitcher_name_matches(pitcher_name, outgoing):
                     runs[inning - 1] += sum(int(value) for value in PBP_RBI_RE.findall(row))
                 current_pitcher = incoming
+                prev_outs = outs_before if outs_before is not None else prev_outs
+                pitcher_at_prev = current_pitcher
                 continue
 
             if current_pitcher and _pitcher_name_matches(pitcher_name, current_pitcher):
                 runs[inning - 1] += sum(int(value) for value in PBP_RBI_RE.findall(row))
+
+            if outs_before is not None:
+                prev_outs = outs_before
+                pitcher_at_prev = current_pitcher
+
+        # Finish the half: remaining outs to 3 belong to whoever was still in.
+        if (
+            prev_outs is not None
+            and prev_outs < 3
+            and pitcher_at_prev
+            and _pitcher_name_matches(pitcher_name, pitcher_at_prev)
+        ):
+            outs_recorded += 3 - prev_outs
 
         # npb.jp omits 打点 on some scoring plays (e.g. GIDP run). When the pitcher
         # worked the entire defensive half with no mid-inning change, use linescore.
@@ -450,7 +489,7 @@ def _parse_pitcher_runs_from_playbyplay(
         ):
             runs[inning - 1] = opp[inning - 1]
 
-    return runs
+    return runs, _format_innings_pitched(outs_recorded)
 
 
 def summarize_thresholds(runs_list: list[int]) -> dict[str, Any]:
@@ -658,6 +697,7 @@ def _build_pitcher_start_row(
     pitcher_name: str,
     *,
     pitcher_runs_by_inning: list[int] | None = None,
+    innings_pitched: str | None = None,
 ) -> dict[str, Any]:
     is_home = parsed["homeTeamId"] == team_id
     side = "home" if is_home else "away"
@@ -692,6 +732,7 @@ def _build_pitcher_start_row(
         "firstFiveRunsAllowed": first_five_allowed,
         "over15": first_five_allowed > 1.5,
         "over25": first_five_allowed > 2.5,
+        "inningsPitched": innings_pitched,
     }
 
 
@@ -728,19 +769,19 @@ async def analyze_pitcher_starts(
             return None
         pbp_html = await client.fetch_playbyplay(meta["href"])
         opp_innings = parsed["awayInnings" if is_home else "homeInnings"]
-        pbp_runs = (
-            _parse_pitcher_runs_from_playbyplay(
+        pbp_runs = None
+        innings_pitched = None
+        if pbp_html:
+            pbp_runs, innings_pitched = _parse_pitcher_runs_from_playbyplay(
                 pbp_html, is_home, pitcher_name, opp_innings
             )
-            if pbp_html
-            else None
-        )
         return _build_pitcher_start_row(
             meta,
             parsed,
             team_id,
             pitcher_name,
             pitcher_runs_by_inning=pbp_runs,
+            innings_pitched=innings_pitched,
         )
 
     rows: list[dict[str, Any]] = []
@@ -971,7 +1012,7 @@ def _recent_batting_form_from_box_logs(
     }
 
 
-NPB_LINEUP_LOGIC_VERSION = 7
+NPB_LINEUP_LOGIC_VERSION = 8
 
 
 def npb_lineups_need_rebuild(
@@ -1197,6 +1238,64 @@ async def _build_side_panel(
         "probablePitcher": probable,
         "pitcherAnalysis": pitcher_analysis,
     }
+
+
+async def rebuild_pitcher_dependent_fields(
+    data: dict[str, Any], *, game_count: int = 10
+) -> dict[str, Any]:
+    """Fill pitcherAnalysis when header updated starters without start rows."""
+    away = dict(data.get("away") or {})
+    home = dict(data.get("home") or {})
+    if not away.get("teamId") or not home.get("teamId"):
+        return data
+
+    matchup_meta = data.get("matchup") or {}
+    lineup_matchup = {
+        "date": matchup_meta.get("date"),
+        "gameDate": matchup_meta.get("gameDate"),
+        "gameSno": matchup_meta.get("gameSno"),
+        "status": matchup_meta.get("status"),
+        "stadium": matchup_meta.get("stadium"),
+        "away": {
+            "teamId": away["teamId"],
+            "teamName": away.get("teamName") or "",
+            "probablePitcher": away.get("probablePitcher"),
+        },
+        "home": {
+            "teamId": home["teamId"],
+            "teamName": home.get("teamName") or "",
+            "probablePitcher": home.get("probablePitcher"),
+        },
+    }
+
+    client = NpbClient()
+    try:
+
+        async def _pitcher_block(panel: dict[str, Any]) -> dict[str, Any] | None:
+            probable = panel.get("probablePitcher") or {}
+            name = (probable.get("fullName") or "").strip()
+            if not name:
+                return None
+            return await analyze_pitcher_starts(
+                client, name, int(panel["teamId"]), game_count, scan_limit=40
+            )
+
+        away_pa, home_pa, starting_lineups = await asyncio.gather(
+            _pitcher_block(away),
+            _pitcher_block(home),
+            fetch_matchup_starting_lineups(client, lineup_matchup),
+        )
+    finally:
+        await client.close()
+
+    away["pitcherAnalysis"] = away_pa
+    home["pitcherAnalysis"] = home_pa
+    data = dict(data)
+    data["away"] = strip_panel_internals(away)
+    data["home"] = strip_panel_internals(home)
+    data["startingLineups"] = starting_lineups
+    data["situational"] = build_matchup_situational(data["away"], data["home"])
+    return data
 
 
 async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str, Any]:

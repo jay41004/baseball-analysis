@@ -828,8 +828,8 @@ async def fetch_pitcher_starts(
             f"{MLB_BASE}/people/{pitcher_id}/stats",
             params={"stats": "gameLog", "group": "pitching", "season": season},
         )
-    resp.raise_for_status()
-    stats = resp.json().get("stats", [])
+        resp.raise_for_status()
+        stats = resp.json().get("stats", [])
     if not stats:
         return []
 
@@ -842,14 +842,60 @@ async def fetch_pitcher_starts(
     return starts[:count]
 
 
+async def resolve_pitcher_id(
+    client: httpx.AsyncClient, pitcher_id: Any, pitcher_name: str | None
+) -> int | None:
+    """Return Stats API person id; look up by name when id is missing (PlaySport fallback)."""
+    try:
+        if pitcher_id is not None and str(pitcher_id).strip() != "":
+            return int(pitcher_id)
+    except (TypeError, ValueError):
+        pass
+    name = (pitcher_name or "").strip()
+    if not name:
+        return None
+    try:
+        async with _MLB_FETCH_SEM:
+            resp = await client.get(
+                f"{MLB_BASE}/people/search",
+                params={"names": name, "sportIds": 1},
+            )
+            resp.raise_for_status()
+            people = resp.json().get("people") or []
+        if not people:
+            return None
+        norm = name.casefold()
+        for person in people:
+            full = (person.get("fullName") or "").casefold()
+            if full == norm:
+                return int(person["id"])
+        for person in people:
+            full = (person.get("fullName") or "").casefold()
+            if norm in full or full in norm:
+                return int(person["id"])
+        return int(people[0]["id"])
+    except Exception:
+        return None
+
+
 async def analyze_pitcher_first_five_starts(
     client: httpx.AsyncClient,
-    pitcher_id: int,
+    pitcher_id: int | None,
     pitcher_name: str,
     count: int = 10,
     *,
     fetch_limit: int = 40,
 ) -> dict[str, Any]:
+    resolved_id = await resolve_pitcher_id(client, pitcher_id, pitcher_name)
+    if resolved_id is None:
+        empty_summary = summarize_pitcher_summary([], [])
+        return {
+            "pitcherId": pitcher_id,
+            "pitcherName": pitcher_name,
+            "games": [],
+            "summary": empty_summary,
+        }
+    pitcher_id = resolved_id
     starts = await fetch_pitcher_starts(client, pitcher_id, fetch_limit)
     if not starts:
         empty_summary = summarize_pitcher_summary([], [])
@@ -1117,9 +1163,18 @@ async def _build_side_panel(
     scoring = await analyze_team_scoring(client, side_info["teamId"], game_count)
     pitcher_analysis = None
     probable = side_info.get("probablePitcher")
-    if probable:
+    if probable and (probable.get("fullName") or probable.get("id") is not None):
+        resolved = await resolve_pitcher_id(
+            client, probable.get("id"), probable.get("fullName")
+        )
+        if resolved is not None:
+            probable = {**probable, "id": resolved}
         pitcher_analysis = await analyze_pitcher_first_five_starts(
-            client, probable["id"], probable["fullName"], game_count, fetch_limit=40
+            client,
+            probable.get("id"),
+            probable.get("fullName") or "",
+            game_count,
+            fetch_limit=40,
         )
 
     return {
@@ -1209,6 +1264,81 @@ async def analyze_matchup(
     if away_table is not None and home_table is not None:
         result["aTable"] = {"away": away_table, "home": home_table}
     return result
+
+
+async def rebuild_pitcher_dependent_fields(
+    data: dict[str, Any], *, game_count: int = 10
+) -> dict[str, Any]:
+    """Fill pitcherAnalysis (+ situational) when header set a starter without start rows.
+
+    Also resolves missing pitcher ids (PlaySport name-only fallback).
+    """
+    away = dict(data.get("away") or {})
+    home = dict(data.get("home") or {})
+    if not away.get("teamId") or not home.get("teamId"):
+        return data
+
+    matchup_meta = data.get("matchup") or {}
+    lineup_matchup = {
+        "date": matchup_meta.get("date"),
+        "gameDate": matchup_meta.get("gameDate"),
+        "gamePk": matchup_meta.get("gamePk"),
+        "status": matchup_meta.get("status"),
+        "away": {
+            "teamId": away["teamId"],
+            "teamName": away.get("teamName") or "",
+            "probablePitcher": away.get("probablePitcher"),
+        },
+        "home": {
+            "teamId": home["teamId"],
+            "teamName": home.get("teamName") or "",
+            "probablePitcher": home.get("probablePitcher"),
+        },
+    }
+
+    async with httpx.AsyncClient(
+        timeout=60.0,
+        limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+    ) as client:
+
+        async def _pitcher_block(panel: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+            probable = panel.get("probablePitcher") or {}
+            name = (probable.get("fullName") or "").strip()
+            if not name and probable.get("id") is None:
+                return probable or None, None
+            if not name:
+                return probable, None
+            resolved = await resolve_pitcher_id(client, probable.get("id"), name)
+            if resolved is not None:
+                probable = {**probable, "id": resolved, "fullName": name}
+            analysis = await analyze_pitcher_first_five_starts(
+                client,
+                probable.get("id"),
+                name,
+                game_count,
+                fetch_limit=40,
+            )
+            return probable, analysis
+
+        (away_prob, away_pa), (home_prob, home_pa), starting_lineups = await asyncio.gather(
+            _pitcher_block(away),
+            _pitcher_block(home),
+            fetch_matchup_starting_lineups(client, lineup_matchup),
+        )
+
+    if away_prob:
+        away["probablePitcher"] = away_prob
+    if home_prob:
+        home["probablePitcher"] = home_prob
+    away["pitcherAnalysis"] = away_pa
+    home["pitcherAnalysis"] = home_pa
+    # Keep existing team scoring panels if present; only refresh pitcher-derived blocks.
+    data = dict(data)
+    data["away"] = strip_panel_internals(away)
+    data["home"] = strip_panel_internals(home)
+    data["startingLineups"] = starting_lineups
+    data["situational"] = build_matchup_situational(data["away"], data["home"])
+    return data
 
 
 async def analyze_team_first_five(team_id: int, game_count: int = 10) -> dict[str, Any]:

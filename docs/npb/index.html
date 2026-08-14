@@ -3,43 +3,43 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>日本職棒 前五局對戰分析</title>
-  <link rel="stylesheet" href="../static/style.css?v=22" />
+  <title>�饻¾�� �e������Ԥ��R</title>
+  <link rel="stylesheet" href="../static/style.css?v=23" />
 </head>
 <body>
   <div class="page">
     <header class="header">
       <div>
         <p class="eyebrow">NPB Predictive Analytics</p>
-        <h1>日本職棒 · 下一場對戰分析</h1>
-        <p class="subtitle">資料來源 NPB 官網 · 左：客隊 · 右：主隊 · 手機主站：<a href="https://jay41004.github.io/baseball-analysis/npb/" target="_blank" rel="noopener">GitHub Pages</a>（完整數據）· <a href="https://baseball-analysis.onrender.com/npb" target="_blank" rel="noopener">Render</a>（即時標頭）</p>
+        <h1>�饻¾�� �P �U�@����Ԥ��R</h1>
+        <p class="subtitle">��ƨӷ� NPB �x�� �P ���G�ȶ� �P �k�G�D�� �P ����D���G<a href="https://jay41004.github.io/baseball-analysis/npb/" target="_blank" rel="noopener">GitHub Pages</a>�]����ƾڡ^�P <a href="https://baseball-analysis.onrender.com/npb" target="_blank" rel="noopener">Render</a>�]�Y�ɼ��Y�^</p>
       </div>
       <nav class="site-nav">
-        <a href="../">MLB 美國職棒</a>
-        <a class="active" href="../npb/">NPB 日本職棒</a>
-        <a href="../cpbl/">CPBL 中華職棒</a>
+        <a href="../">MLB ����¾��</a>
+        <a class="active" href="../npb/">NPB �饻¾��</a>
+        <a href="../cpbl/">CPBL ����¾��</a>
       </nav>
     </header>
 
     <section class="controls card">
-      <label for="team-select">選擇球隊（12 球團）</label>
+      <label for="team-select">��ܲy���]12 �y�Ρ^</label>
       <div class="control-row">
         <select id="team-select">
-          <option value="">載入中...</option>
+          <option value="">���J��...</option>
         </select>
-        <label class="inline-label" for="game-count">場數</label>
+        <label class="inline-label" for="game-count">����</label>
         <input id="game-count" type="number" min="1" max="30" value="10" />
-        <button id="refresh-btn" type="button">立即更新</button>
+        <button id="refresh-btn" type="button">�ߧY��s</button>
       </div>
-      <p id="cache-status" class="cache-status">資料每小時自動更新</p>
+      <p id="cache-status" class="cache-status">��ƨC�p�ɦ۰ʧ�s</p>
     </section>
 
-    <div id="loading" class="loading hidden">正在抓取 NPB 數據...</div>
+    <div id="loading" class="loading hidden">���b��� NPB �ƾ�...</div>
     <div id="error" class="error hidden"></div>
 
     <section id="results" class="hidden">
       <article class="card matchup-header">
-        <p class="stat-label">下一場對戰</p>
+        <p class="stat-label">�U�@�����</p>
         <h2 id="matchup-title" class="matchup-title">-</h2>
         <p id="matchup-meta" class="matchup-meta"></p>
       </article>
@@ -52,11 +52,11 @@
   </div>
 
 <script>window.SITE_STATIC=true;</script>
-  <script src="../static/api_utils.js?v=5"></script>
-  <script src="../static/lineup.js?v=11"></script>
-  <script src="../static/lineup_loader.js?v=3"></script>
+  <script src="../static/api_utils.js?v=7"></script>
+  <script src="../static/lineup.js?v=13"></script>
+  <script src="../static/lineup_loader.js?v=4"></script>
   <script src="../static/a_table.js?v=11"></script>
   <script src="../static/situational.js?v=1"></script>
-  <script src="../static/npb.js?v=22"></script>
+  <script src="../static/npb.js?v=24"></script>
 </body>
 </html>
