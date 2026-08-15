@@ -1024,14 +1024,16 @@ async def analyze_team_scoring(
         side = _team_side(game, team_id)
         linescore = linescore_by_pk[game["gamePk"]]
         scored: list[int] = []
-        for inning in range(1, 10):
-            runs = 0
-            for inn in linescore.get("innings", []):
-                if inn.get("num") == inning:
-                    runs = inn.get(side, {}).get("runs", 0) or 0
-                    break
+        for inn in linescore.get("innings", []):
+            try:
+                num = int(inn.get("num"))
+            except (TypeError, ValueError):
+                continue
+            if num < 1:
+                continue
+            runs = inn.get(side, {}).get("runs", 0) or 0
             if runs > 0:
-                scored.append(inning)
+                scored.append(num)
         return scored
 
     def build_row(
@@ -1081,7 +1083,7 @@ async def analyze_team_scoring(
         scored_pool.append(build_row(game, include_scored=True))
 
     rows = [
-        build_row(game, starters=starters)
+        build_row(game, starters=starters, include_scored=True)
         for game, starters in zip(panel_games, starters_list)
     ]
 

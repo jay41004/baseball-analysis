@@ -655,8 +655,7 @@ async def analyze_team_scoring(
         }
         if include_scored:
             scored_innings: list[int] = []
-            for index in range(9):
-                runs = inning_runs[index] if index < len(inning_runs) else 0
+            for index, runs in enumerate(inning_runs):
                 if runs > 0:
                     scored_innings.append(index + 1)
             row["scoredInnings"] = scored_innings
@@ -678,7 +677,7 @@ async def analyze_team_scoring(
     for meta in panel_meta:
         parsed = parsed_by_href.get(meta.get("href", ""))
         if parsed:
-            rows.append(build_row(meta, parsed))
+            rows.append(build_row(meta, parsed, include_scored=True))
 
     runs_list = [row["firstFiveRuns"] for row in rows]
     return {
