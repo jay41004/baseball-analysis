@@ -1,12 +1,12 @@
 {
   "mode": "static",
-  "generatedAt": "2026-08-04T16:59:27.480017+08:00",
-  "mlbCacheVersion": 15,
-  "npbCacheVersion": 18,
-  "cpblCacheVersion": 14,
+  "generatedAt": "2026-08-31T22:05:46.873261+08:00",
+  "mlbCacheVersion": 17,
+  "npbCacheVersion": 21,
+  "cpblCacheVersion": 17,
   "mlbTeamsCached": 30,
   "npbTeamsCached": 12,
   "cpblTeamsCached": 6,
   "cacheReady": true,
-  "note": "Refreshed by GitHub Actions on a schedule"
+  "note": "Refreshed locally for GitHub Pages"
 }

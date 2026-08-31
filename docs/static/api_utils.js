@@ -60,6 +60,14 @@ window.SiteConfig = (function () {
     meta() {
       return isStatic ? `${base}/data/meta.json` : api("/api/meta");
     },
+    slate(league) {
+      if (isStatic) {
+        if (league) return dataUrl(league, "slate.json");
+        return `${base}/data/slate.json`;
+      }
+      const q = league ? `?league=${encodeURIComponent(league)}` : "";
+      return api(`/api/slate${q}`);
+    },
     /** Render live API for lineup-only refresh on static GitHub Pages. */
     liveLineupApi(league) {
       return `${liveApiRoot}/api/${league}`;
@@ -154,6 +162,75 @@ window.ApiUtils = (function () {
   }
 
   return { readJson, fetchJson, isHtmlBody };
+})();
+
+/** Shared matchup header helpers (today/tomorrow labels, starters). */
+window.MatchupMeta = (function () {
+  function taiwanTodayYmd() {
+    return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
+  }
+
+  function taiwanTomorrowYmd() {
+    const t = new Date();
+    t.setTime(t.getTime() + 86_400_000);
+    return t.toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
+  }
+
+  function dayLabel(gameDateYmd) {
+    if (!gameDateYmd) return "";
+    const today = taiwanTodayYmd();
+    if (gameDateYmd === today) return "今日賽事";
+    if (gameDateYmd === taiwanTomorrowYmd()) return "明日賽事";
+    if (gameDateYmd < today) return "快照已過期";
+    return `${gameDateYmd} 賽事`;
+  }
+
+  function formatGameTime(iso, timeTaiwan) {
+    if (timeTaiwan) return String(timeTaiwan);
+    if (!iso) return "";
+    const raw = String(iso).trim();
+    const hasTz = /[zZ]|[+-]\d{2}:\d{2}$/.test(raw);
+    const normalized = hasTz ? raw : `${raw}Z`;
+    return new Date(normalized).toLocaleString("zh-TW", {
+      timeZone: "Asia/Taipei",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+
+  function buildMetaText(matchup, away, home) {
+    const gameDate = String(matchup?.date || "").slice(0, 10);
+    const label = dayLabel(gameDate);
+    const taiwanTime = formatGameTime(matchup?.gameDate, matchup?.timeTaiwan);
+    const parts = [];
+    if (label) parts.push(label);
+    if (gameDate) parts.push(gameDate);
+    if (matchup?.stadium) parts.push(String(matchup.stadium).replace(/\s+/g, " ").trim());
+    if (taiwanTime) parts.push(`台灣 ${taiwanTime}`);
+    parts.push(matchup?.status || "Scheduled");
+    const awayP = away?.probablePitcher?.fullName;
+    const homeP = home?.probablePitcher?.fullName;
+    if (awayP || homeP) {
+      parts.push(`先發 ${awayP || "待定"} vs ${homeP || "待定"}`);
+    } else if (gameDate === taiwanTodayYmd()) {
+      parts.push("先發：官網尚未公布");
+    }
+    return parts.join(" · ");
+  }
+
+  function isStaleMatchup(matchup) {
+    const gameDate = String(matchup?.date || "").slice(0, 10);
+    return Boolean(gameDate && gameDate < taiwanTodayYmd());
+  }
+
+  function formatPitchCount(value) {
+    if (value == null || value === "") return "-";
+    const n = Number(value);
+    return Number.isFinite(n) ? String(n) : "-";
+  }
+
+  return { taiwanTodayYmd, dayLabel, formatGameTime, buildMetaText, isStaleMatchup, formatPitchCount };
 })();
 
 /** Keep horizontal table scrolling from bouncing back to the page. */

@@ -13,6 +13,8 @@ from app.inning_comparison import (
     build_matchup_situational,
     strip_panel_internals,
 )
+from app.pitcher_rows import mlb_feed_is_final, pitch_count_from_stat
+from app.mlb_display import format_matchup_timing
 from app.team_names import team_name_zh
 
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
@@ -778,6 +780,17 @@ async def fetch_next_matchup(
     upcoming.sort(key=_sort_key)
     game = upcoming[0]
 
+    home_team = game["teams"]["home"]["team"]
+    home_id = int(home_team["id"])
+    venue_raw = (game.get("venue") or {}).get("name") or ""
+    game_date_iso = game.get("gameDate")
+    timing = format_matchup_timing(
+        str(game_date_iso or ""),
+        venue_raw=venue_raw,
+        home_team_id=home_id,
+        official_date=game.get("officialDate"),
+    )
+
     def side_info(side: str) -> dict[str, Any]:
         team = game["teams"][side]["team"]
         probable = game["teams"][side].get("probablePitcher")
@@ -790,10 +803,14 @@ async def fetch_next_matchup(
         }
 
     return {
-        "date": game.get("officialDate"),
-        "gameDate": game.get("gameDate"),
+        "date": timing["date"],
+        "officialDate": game.get("officialDate"),
+        "gameDate": game_date_iso,
         "gamePk": game.get("gamePk"),
         "status": game.get("status", {}).get("detailedState"),
+        "stadium": timing["stadium"],
+        "timeTaiwan": timing["timeTaiwan"],
+        "timeLocal": timing["timeLocal"],
         "focusTeamId": focus_team_id,
         "away": side_info("away"),
         "home": side_info("home"),
@@ -907,12 +924,10 @@ async def analyze_pitcher_first_five_starts(
         }
 
     display_starts = starts[:count]
-    away_starts = [split for split in starts if not split.get("isHome")][:10]
-    home_starts = [split for split in starts if split.get("isHome")][:10]
 
     needed_splits: list[dict[str, Any]] = []
     seen_pks: set[int] = set()
-    for split in display_starts + away_starts + home_starts:
+    for split in starts:
         game_pk = split["game"]["gamePk"]
         if game_pk in seen_pks:
             continue
@@ -928,8 +943,9 @@ async def analyze_pitcher_first_five_starts(
 
     row_by_pk: dict[int, dict[str, Any]] = {}
     for split, linescore, starters, feed in zip(needed_splits, linescores, starters_list, feeds):
+        if not mlb_feed_is_final(feed):
+            continue
         is_home = split.get("isHome", False)
-        runs_allowed = first_five_runs_allowed(linescore, is_home)
         team_score, opponent_score = _scores_from_linescore(linescore, is_home)
         stat = split.get("stat", {})
         innings_pitched = stat.get("inningsPitched")
@@ -945,6 +961,7 @@ async def analyze_pitcher_first_five_starts(
             innings_pitched=innings_pitched,
             earned_runs=earned_runs,
         )
+        runs_allowed = sum(runs_by_inning[:5])
         first_inning_runs = runs_by_inning[0] if runs_by_inning else 0
         scored_innings = scored_innings_from_runs(runs_by_inning)
         opponent_info = split.get("opponent", {})
@@ -969,15 +986,17 @@ async def analyze_pitcher_first_five_starts(
             "over25": runs_allowed > 2.5,
             "inningsPitched": innings_pitched,
             "earnedRuns": earned_runs,
+            "pitchCount": pitch_count_from_stat(stat),
             "result": split.get("isWin"),
         }
 
-    rows = [row_by_pk[split["game"]["gamePk"]] for split in needed_splits]
-    display_rows = [
-        row_by_pk[split["game"]["gamePk"]]
-        for split in display_starts
-        if split["game"]["gamePk"] in row_by_pk
-    ]
+    complete_ordered: list[dict[str, Any]] = []
+    for split in starts:
+        pk = split["game"]["gamePk"]
+        if pk in row_by_pk:
+            complete_ordered.append(row_by_pk[pk])
+    display_rows = complete_ordered[:count]
+    rows = complete_ordered
     runs_list = [row["firstFiveRunsAllowed"] for row in display_rows]
     return {
         "pitcherId": pitcher_id,
@@ -1257,6 +1276,9 @@ async def analyze_matchup(
             "gameDate": matchup.get("gameDate"),
             "gamePk": matchup["gamePk"],
             "status": matchup["status"],
+            "stadium": matchup.get("stadium"),
+            "timeTaiwan": matchup.get("timeTaiwan"),
+            "timeLocal": matchup.get("timeLocal"),
         },
         "away": away_panel,
         "home": home_panel,

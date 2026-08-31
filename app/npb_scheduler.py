@@ -174,8 +174,10 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
     def _name(panel: dict | None) -> str:
         return ((panel or {}).get("probablePitcher") or {}).get("fullName") or ""
 
+    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = any(
+    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
         _name(data.get(side))
         and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
         for side in ("away", "home")
@@ -208,6 +210,7 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
             return
 
         data = await analyze_matchup(team_id, games)
+        data["cacheVersion"] = CACHE_VERSION
         client = NpbClient()
         try:
             matchup = await fetch_next_matchup(client, team_id)

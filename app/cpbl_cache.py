@@ -13,7 +13,7 @@ from app.inning_comparison import a_table_payload_complete
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 15
+CACHE_VERSION = 17
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "cpbl_cache.json"
@@ -77,7 +77,9 @@ def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
     # Incomplete official firstSno (often 6–7) should be rebuilt to a full 9-man card.
     if (away_batters and away_batters < 9) or (home_batters and home_batters < 9):
         return True
-    return False
+    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+
+    return pitcher_analysis_missing_pitch_counts(data)
 
 
 def get_a_table(team_id: int) -> dict[str, Any] | None:

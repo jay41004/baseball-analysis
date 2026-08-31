@@ -174,13 +174,6 @@ async def _wrap_npb_matchup(team_id: int, entry: dict, *, refreshing: bool) -> d
     payload = await asyncio.to_thread(
         wrap_npb_matchup_response, entry, refreshing=refreshing
     )
-    matchup = payload.get("matchup") or {}
-    if npb_lineups_need_rebuild(
-        payload.get("startingLineups"),
-        matchup_date=(matchup.get("date") or "")[:10],
-        matchup_status=matchup.get("status"),
-    ):
-        payload["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
     return _attach_a_table(
         payload,
         team_id,
@@ -190,15 +183,16 @@ async def _wrap_npb_matchup(team_id: int, entry: dict, *, refreshing: bool) -> d
     )
 
 
+def _lineups_have_card(lineups: dict | None) -> bool:
+    if not isinstance(lineups, dict):
+        return False
+    away = len((lineups.get("away") or {}).get("batters") or [])
+    home = len((lineups.get("home") or {}).get("batters") or [])
+    return away >= 7 or home >= 7
+
+
 def _wrap_cpbl_matchup(team_id: int, entry: dict, *, refreshing: bool) -> dict:
     payload = wrap_cpbl_matchup_response(entry, refreshing=refreshing)
-    matchup = payload.get("matchup") or {}
-    if cpbl_lineups_need_rebuild(
-        payload.get("startingLineups"),
-        matchup_date=(matchup.get("date") or "")[:10],
-        matchup_status=matchup.get("status"),
-    ):
-        payload["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
     return _attach_a_table(
         payload,
         team_id,
@@ -209,10 +203,10 @@ def _wrap_cpbl_matchup(team_id: int, entry: dict, *, refreshing: bool) -> dict:
 
 
 def _wrap_mlb_matchup(team_id: int, entry: dict, *, refreshing: bool) -> dict:
+    from app.mlb_display import apply_mlb_matchup_timing
+
     payload = wrap_matchup_response(entry, refreshing=refreshing)
-    # Drop stale substitute lineups so the client refetches with starter-only parsing.
-    if mlb_lineups_need_rebuild(payload.get("startingLineups")):
-        payload["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
+    payload = apply_mlb_matchup_timing(payload)
     return _attach_a_table(
         payload,
         team_id,
@@ -365,6 +359,25 @@ async def cpbl_index(request: Request):
     return templates.TemplateResponse("cpbl.html", {"request": request})
 
 
+@app.get("/slate", response_class=HTMLResponse)
+async def slate_index(request: Request):
+    return templates.TemplateResponse("slate.html", {"request": request})
+
+
+@app.get("/api/slate")
+async def api_slate(league: str | None = None):
+    from app.slate_service import fetch_all_slates, fetch_league_slate
+
+    try:
+        if league:
+            return await fetch_league_slate(league)
+        return await fetch_all_slates()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"賽程載入失敗: {exc}") from exc
+
+
 @app.get("/api/teams")
 async def api_teams():
     return await fetch_teams()
@@ -391,6 +404,13 @@ async def api_matchup(
 
         cached = get_matchup(team_id, games)
         needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
+        if cached and not force:
+            matchup_meta = (cached.get("data") or {}).get("matchup") or {}
+            if matchup_meta.get("gameDate") and (
+                not matchup_meta.get("stadium") or not matchup_meta.get("timeTaiwan")
+            ):
+                await refresh_matchup_header(team_id, games)
+                cached = get_matchup(team_id, games)
 
         if needs_refresh:
             # Always patch next-game header first so Live/In-Progress shows
@@ -435,15 +455,15 @@ async def api_npb_matchup(
 
         refreshing = False
         if needs_refresh:
-            if is_cloud_lite():
-                # Header-only (+ Pages seed) — full rebuild OOMs on free tier.
-                try:
-                    await refresh_npb_header(team_id, games)
-                except Exception:
-                    import logging
+            try:
+                await refresh_npb_header(team_id, games)
+            except Exception:
+                import logging
 
-                    logging.getLogger(__name__).exception("NPB cloud header refresh failed")
-                cached = get_npb_matchup(team_id, games)
+                logging.getLogger(__name__).exception("NPB header refresh failed")
+            cached = get_npb_matchup(team_id, games)
+            if is_cloud_lite():
+                pass
             elif not npb_is_refreshing(team_id, games):
                 started = await _schedule_matchup_refresh(
                     lambda: refresh_npb_matchup(team_id, games), force=force
@@ -497,14 +517,15 @@ async def api_cpbl_matchup(
 
         refreshing = False
         if needs_refresh:
-            if is_cloud_lite():
-                try:
-                    await refresh_cpbl_header(team_id, games)
-                except Exception:
-                    import logging
+            try:
+                await refresh_cpbl_header(team_id, games)
+            except Exception:
+                import logging
 
-                    logging.getLogger(__name__).exception("CPBL cloud header refresh failed")
-                cached = get_cpbl_matchup(team_id, games)
+                logging.getLogger(__name__).exception("CPBL header refresh failed")
+            cached = get_cpbl_matchup(team_id, games)
+            if is_cloud_lite():
+                pass
             elif not cpbl_is_refreshing(team_id, games):
                 started = await _schedule_matchup_refresh(
                     lambda: refresh_cpbl_matchup(team_id, games), force=force
@@ -539,6 +560,30 @@ async def api_cpbl_lineup(
     ):
         return lineups
 
+    if not force and _lineups_have_card(lineups):
+        async def _rebuild_cpbl_lineups() -> None:
+            try:
+                client = CpblClient()
+                try:
+                    matchup = await fetch_next_matchup(client, team_id)
+                    if not matchup:
+                        return
+                    rebuilt = await fetch_matchup_starting_lineups(client, matchup)
+                finally:
+                    await client.close()
+                entry = get_cpbl_matchup(team_id, games)
+                if entry:
+                    data = copy.deepcopy(entry["data"])
+                    data["startingLineups"] = rebuilt
+                    await store_cpbl_matchup(team_id, games, data)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception("CPBL background lineup rebuild failed")
+
+        _schedule(_rebuild_cpbl_lineups())
+        return lineups
+
     client = CpblClient()
     try:
         matchup = await fetch_next_matchup(client, team_id)
@@ -571,6 +616,30 @@ async def api_mlb_lineup(
     cached = get_matchup(team_id, games)
     lineups = (cached.get("data") or {}).get("startingLineups") if cached else None
     if not force and not mlb_lineups_need_rebuild(lineups):
+        return lineups
+
+    if not force and _lineups_have_card(lineups):
+        async def _rebuild_mlb_lineups() -> None:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=60.0,
+                    limits=httpx.Limits(max_connections=24, max_keepalive_connections=12),
+                ) as client:
+                    matchup = await fetch_mlb_next_matchup(client, team_id)
+                    if not matchup:
+                        return
+                    rebuilt = await fetch_mlb_starting_lineups(client, matchup)
+                entry = get_matchup(team_id, games)
+                if entry:
+                    data = copy.deepcopy(entry["data"])
+                    data["startingLineups"] = rebuilt
+                    await store_mlb_matchup(team_id, games, data)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception("MLB background lineup rebuild failed")
+
+        _schedule(_rebuild_mlb_lineups())
         return lineups
 
     async with httpx.AsyncClient(
@@ -614,6 +683,32 @@ async def api_npb_lineup(
         if lineups:
             lineups = copy.deepcopy(lineups)
             localize_starting_lineups(lineups)
+        return lineups
+
+    if not force and _lineups_have_card(lineups):
+        async def _rebuild_npb_lineups() -> None:
+            try:
+                client = NpbClient()
+                try:
+                    matchup = await fetch_npb_next_matchup(client, team_id)
+                    if not matchup:
+                        return
+                    rebuilt = await fetch_npb_starting_lineups(client, matchup)
+                finally:
+                    await client.close()
+                entry = get_npb_matchup(team_id, games)
+                if entry:
+                    data = copy.deepcopy(entry["data"])
+                    data["startingLineups"] = rebuilt
+                    await store_npb_matchup(team_id, games, data)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception("NPB background lineup rebuild failed")
+
+        _schedule(_rebuild_npb_lineups())
+        lineups = copy.deepcopy(lineups)
+        localize_starting_lineups(lineups)
         return lineups
 
     client = NpbClient()

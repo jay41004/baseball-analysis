@@ -217,8 +217,10 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         data.pop("aTable", None)
         data.pop("situational", None)
 
+    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = any(
+    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
         _name(data.get(side))
         and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
         for side in ("away", "home")

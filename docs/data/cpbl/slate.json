@@ -1,0 +1,39 @@
+{
+  "league": "cpbl",
+  "today": "2026-08-31",
+  "tomorrow": "2026-09-01",
+  "todayGames": [],
+  "tomorrowGames": [
+    {
+      "league": "cpbl",
+      "date": "2026-09-01",
+      "awayTeamId": 1,
+      "homeTeamId": 6,
+      "awayName": "中信兄弟",
+      "homeName": "台鋼雄鷹",
+      "awayPitcher": "羅戈",
+      "homePitcher": "坎南",
+      "status": "Scheduled",
+      "stadium": "澄清湖",
+      "timeTaiwan": "18:00",
+      "timeLocal": "",
+      "analysisUrl": "/cpbl?team=1"
+    },
+    {
+      "league": "cpbl",
+      "date": "2026-09-01",
+      "awayTeamId": 2,
+      "homeTeamId": 4,
+      "awayName": "統一獅",
+      "homeName": "富邦悍將",
+      "awayPitcher": "銳力獅",
+      "homePitcher": "魔力藍",
+      "status": "Scheduled",
+      "stadium": "大巨蛋",
+      "timeTaiwan": "18:00",
+      "timeLocal": "",
+      "analysisUrl": "/cpbl?team=2"
+    }
+  ],
+  "generatedAt": "2026-08-31T22:05:46.851600+08:00"
+}

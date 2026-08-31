@@ -458,6 +458,8 @@ def localize_starting_lineups(lineups: dict | None) -> None:
 
 
 def localize_matchup_payload(payload: dict) -> None:
+    from app.npb_teams import team_zh
+
     matchup = payload.get("matchup")
     if matchup:
         stadium = matchup.get("stadium")
@@ -472,6 +474,11 @@ def localize_matchup_payload(payload: dict) -> None:
         panel = payload.get(side)
         if not panel:
             continue
+        tid = panel.get("teamId")
+        if tid:
+            zh = team_zh(int(tid))
+            if zh:
+                panel["teamName"] = zh
         localize_probable_pitcher(panel.get("probablePitcher"))
         localize_side_games(panel.get("games") or [])
         localize_pitcher_analysis(panel.get("pitcherAnalysis"))

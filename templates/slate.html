@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>今日・明日對戰表</title>
+  <link rel="stylesheet" href="/static/style.css?v=24" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <p class="eyebrow">Matchup Slate</p>
+        <h1>今日・明日對戰表</h1>
+        <p class="subtitle">點任一場進入該隊完整分析（左客右主）· 資料來自各聯盟官網賽程</p>
+      </div>
+      <nav class="site-nav">
+        <a class="active" href="/slate">今日賽程</a>
+        <a href="/">MLB</a>
+        <a href="/npb">NPB</a>
+        <a href="/cpbl">CPBL</a>
+      </nav>
+    </header>
+
+    <p id="slate-status" class="cache-status">載入賽程中…</p>
+    <div id="slate-error" class="error hidden"></div>
+    <div id="slate-root"></div>
+  </div>
+
+  <script src="/static/api_utils.js?v=9"></script>
+  <script src="/static/slate.js?v=1"></script>
+</body>
+</html>

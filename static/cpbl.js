@@ -3,7 +3,7 @@ const STORAGE_KEY = "cpbl_last_team";
 const REFRESH_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
-const EXPECTED_CACHE_VERSION = 13;
+const EXPECTED_CACHE_VERSION = 17;
 
 const FETCH_TIMEOUT_MS = 90000;
 const MAX_POLL_ATTEMPTS = 120;
@@ -52,12 +52,7 @@ function updateMatchupHeader(data) {
       `<span class="team-name-home">${home.teamName}</span>`;
   }
   if (metaEl) {
-    const taiwanTime = formatGameTime(matchup.gameDate);
-    const metaParts = [matchup.date];
-    if (matchup.stadium) metaParts.push(matchup.stadium.replace(/\s+/g, " ").trim());
-    if (taiwanTime) metaParts.push(`台灣 ${taiwanTime}`);
-    metaParts.push(matchup.status || "Scheduled");
-    metaEl.textContent = metaParts.join(" · ");
+    metaEl.textContent = MatchupMeta.buildMetaText(matchup, away, home);
   }
 }
 
@@ -69,18 +64,6 @@ function pct(count, total) {
 function formatTime(iso) {
   if (!iso) return "-";
   return new Date(iso).toLocaleString("zh-TW", { hour12: false });
-}
-
-function formatGameTime(iso) {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString("zh-TW", {
-    timeZone: "Asia/Taipei",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
 }
 
 function showLoading(show, message = "正在抓取 CPBL 數據...") {
@@ -106,6 +89,9 @@ function updateCacheStatus(data) {
   if (data.cacheVersion) text += ` · 快取 v${data.cacheVersion}`;
   if (!SiteConfig.isStatic && data.cacheVersion && data.cacheVersion < expectedCacheVersion) {
     text += " · 請按「立即更新」或 Ctrl+F5";
+  }
+  if (SiteConfig.isStatic && data.matchup && MatchupMeta.isStaleMatchup(data.matchup)) {
+    text += " · 快照已過期，請等 GitHub Actions 更新或開本機";
   }
   if (data.refreshing) text += " · 背景更新中…";
   cacheStatusEl.textContent = text;
@@ -370,6 +356,7 @@ function pitcherGamesTable(games, scrollKey = "pitcher-games") {
             <th class="col-match">日期 / 對手</th>
             <th class="col-score">比分</th>
             <th class="col-num"><span class="th-full">先發局數</span><span class="th-short">局數</span></th>
+            <th class="col-num"><span class="th-full">用球數</span><span class="th-short">球數</span></th>
             <th class="col-num"><span class="th-full">掉分局數</span><span class="th-short">掉分局</span></th>
             <th class="col-num"><span class="th-full">1局掉分</span><span class="th-short">1局</span></th>
             <th class="col-num"><span class="th-full">1–5 失分</span><span class="th-short">1-5</span></th>
@@ -385,6 +372,7 @@ function pitcherGamesTable(games, scrollKey = "pitcher-games") {
               <td class="col-match">${formatMatchCell(game)}</td>
               <td class="col-score">${formatFinalScore(game)}</td>
               <td class="col-num">${formatInningsPitched(game.inningsPitched)}</td>
+              <td class="col-num">${MatchupMeta.formatPitchCount(game.pitchCount)}</td>
               <td class="col-num">${formatScoredInnings(game)}</td>
               <td class="col-num">${inningScoredBadge(game.firstInningScored)}</td>
               <td class="col-num runs">${game.firstFiveRunsAllowed}</td>
@@ -478,6 +466,13 @@ function renderMatchup(data, { skipIfUnchanged = false } = {}) {
   return true;
 }
 
+function teamIdFromQuery() {
+  const raw = new URLSearchParams(location.search).get("team");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? String(n) : null;
+}
+
 async function loadTeams() {
   const { resp, data: teams } = await ApiUtils.fetchJson(SiteConfig.cpblTeams(), fetchWithTimeout, {
     onWaiting(n, total) {
@@ -491,7 +486,8 @@ async function loadTeams() {
     .join("");
 
   const savedTeam = localStorage.getItem(STORAGE_KEY);
-  teamSelect.value = savedTeam || String(DEFAULT_TEAM_ID);
+  const fromQuery = teamIdFromQuery();
+  teamSelect.value = fromQuery || savedTeam || String(DEFAULT_TEAM_ID);
 }
 
 function isDataReady(data) {
@@ -500,8 +496,7 @@ function isDataReady(data) {
 }
 
 function setBusy(isBusy, message) {
-  showLoading(isBusy);
-  teamSelect.disabled = isBusy;
+  showLoading(isBusy && !hasDisplayedData);
   refreshBtn.disabled = isBusy;
   if (message) cacheStatusEl.textContent = message;
 }
@@ -555,7 +550,7 @@ function needsFreshData(data, games) {
   return false;
 }
 
-async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = false) {
+async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = false, isTeamSwitch = false) {
   const teamId = teamSelect.value;
   const games = Number(gameCountInput.value) || 10;
   if (!teamId) return;
@@ -571,7 +566,6 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
-    LineupLoader.clearDisplayedLineups();
     if (!hasDisplayedData) {
       setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
     } else {
@@ -594,7 +588,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     if (token !== fetchToken) return;
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
-    if (!force && allowAutoRetry && needsFreshData(data, games)) {
+    if (!force && allowAutoRetry && !isTeamSwitch && needsFreshData(data, games)) {
       cacheStatusEl.textContent = "偵測到舊資料，正在自動更新…";
       fetchInFlight = false;
       setBusy(false);
@@ -676,9 +670,30 @@ async function loadMeta() {
   }
 }
 
+function beginTeamSwitch() {
+  lastContentFingerprint = "";
+  LineupLoader.clearDisplayedLineups();
+  if (typeof cancelATableLoad === "function") cancelATableLoad();
+  const aRoot = document.getElementById("a-table-root");
+  const sRoot = document.getElementById("situational-root");
+  if (aRoot) aRoot.innerHTML = "";
+  if (sRoot) sRoot.innerHTML = "";
+  const titleEl = document.getElementById("matchup-title");
+  const metaEl = document.getElementById("matchup-meta");
+  if (titleEl) titleEl.textContent = "載入中…";
+  if (metaEl) metaEl.textContent = "";
+  matchupGridEl.innerHTML = '<p class="lineup-note switch-loading">載入中…</p>';
+}
+
 refreshBtn.addEventListener("click", () => fetchAnalysis(true));
-teamSelect.addEventListener("change", () => fetchAnalysis(false));
-gameCountInput.addEventListener("change", () => fetchAnalysis(false));
+teamSelect.addEventListener("change", () => {
+  beginTeamSwitch();
+  fetchAnalysis(false, true, false, true);
+});
+gameCountInput.addEventListener("change", () => {
+  beginTeamSwitch();
+  fetchAnalysis(false, true, false, true);
+});
 
 window.addEventListener("pagehide", () => {
   clearPollTimer();
@@ -695,7 +710,17 @@ window.addEventListener("pageshow", (event) => {
 });
 
 loadTeams()
-  .then(() => loadMeta())
+  .then(() => {
+    GamePicker.mount({
+      league: "cpbl",
+      teamSelect,
+      onSelect() {
+        beginTeamSwitch();
+        fetchAnalysis(false, true, false, true);
+      },
+    });
+    return loadMeta();
+  })
   .then(() => fetchAnalysis(false))
   .then(() => scheduleHourlyRefresh())
   .catch((err) => showError(err.message));

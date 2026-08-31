@@ -14,6 +14,42 @@ def _count_matchups(league_dir: Path) -> int:
     return len(list(league_dir.glob("matchup_*_10.json")))
 
 
+def _matchup_tuple(path: Path) -> tuple[str, int, int]:
+    """Sort key: newer game date wins; then richer payload."""
+    if not path.is_file():
+        return ("", 0, 0)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return ("", 0, 0)
+    date = str((data.get("matchup") or {}).get("date") or "")[:10]
+    richness = 0
+    for side in ("away", "home"):
+        panel = data.get(side) or {}
+        if panel.get("probablePitcher"):
+            richness += 2
+        if panel.get("pitcherAnalysis"):
+            richness += 4
+        richness += min(len(panel.get("games") or []), 10)
+        lineups = panel.get("lineups") or data.get("lineups") or {}
+        batters = (lineups.get(side) or {}).get("batters") or []
+        if len(batters) >= 7:
+            richness += 3
+    return (date, richness, _count_matchups(path.parent))
+
+
+def _merge_league_files(prev_dir: Path, new_dir: Path) -> None:
+    if not prev_dir.is_dir() or not new_dir.is_dir():
+        return
+    for new_file in new_dir.glob("matchup_*_10.json"):
+        prev_file = prev_dir / new_file.name
+        if not prev_file.is_file():
+            continue
+        if _matchup_tuple(prev_file) > _matchup_tuple(new_file):
+            print(f"  keep prev {new_file.name}")
+            shutil.copy2(prev_file, new_file)
+
+
 def _copy_league(src: Path, dst: Path) -> None:
     if not src.is_dir():
         return
@@ -38,6 +74,7 @@ def merge(prev_root: Path, new_root: Path) -> None:
             _copy_league(prev_data / league, new_data / league)
         else:
             print(f"USE new {league}: new={new_n} prev={prev_n}")
+            _merge_league_files(prev_data / league, new_data / league)
 
     # Refresh meta counts from whatever we kept.
     meta_path = new_data / "meta.json"

@@ -73,6 +73,9 @@ jobs:
           test -f docs/data/mlb/teams.json
           test -f docs/data/meta.json
           test -f docs/data/health.json
+          test -f docs/data/mlb/slate.json
+          test -f docs/data/npb/slate.json
+          test -f docs/data/cpbl/slate.json
           python - <<'PY'
           import json
           from pathlib import Path

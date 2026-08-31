@@ -139,6 +139,9 @@ def main() -> None:
     _export_mlb()
     _export_npb()
     _export_cpbl()
+    from scripts.export_slates import export_slates
+
+    export_slates(DATA)
     _write_meta()
     (DOCS / ".nojekyll").write_text("", encoding="utf-8")
     print(f"Static site ready: {DOCS}")

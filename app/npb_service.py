@@ -16,7 +16,7 @@ from app.npb_teams import TEAM_BY_CODE, TEAM_BY_ID, list_teams, match_team, team
 from app.npb_vs_pitcher import enrich_batters_vs_pitcher
 
 NPB_BASE = "https://npb.jp"
-GAME_PARSER_VERSION = 5
+GAME_PARSER_VERSION = 6
 JST = timezone(timedelta(hours=9))
 # npb.jp lists matchups as HOME - AWAY (e.g. 巨人 - 中日 at 東京ドーム).
 FINAL_SCORE_RE = re.compile(
@@ -320,17 +320,22 @@ class NpbClient:
         for value in cells:
             if value in {"計", "H", "E"}:
                 break
-            if value in {"x", "X", "-", ""}:
-                runs.append(0)
-            elif value.isdigit():
-                runs.append(int(value))
-            else:
-                runs.append(0)
-        return runs
+            parsed = _parse_inning_run_cell(value)
+            if parsed is None:
+                break
+            runs.append(parsed)
+        # Header row often only labels 1–9; R/H/E cells are bare digits with no
+        # 「計」/H/E label, so they leak in as fake innings 10/11/12. Drop them
+        # when the third-from-last value matches the sum of prior inning runs.
+        return _trim_linescore_rhe(runs)
 
     def _parse_starters(self, soup: BeautifulSoup) -> dict[int, str]:
+        """Parse starters from the バッテリー table only (not 本塁打 / 勝敗)."""
         starters: dict[int, str] = {}
-        for row in soup.select("table tr"):
+        rows = _battery_table_rows(soup)
+        if not rows:
+            rows = list(soup.select("table tr"))
+        for row in rows:
             cells = [cell.get_text(" ", strip=True) for cell in row.select("th, td")]
             if len(cells) < 2:
                 continue
@@ -343,10 +348,20 @@ class NpbClient:
             team = match_team(team_label)
             if not team:
                 continue
-            starter = _starter_from_lineup(pitchers)
+            starter = _starter_from_battery(pitchers)
             if starter and team["id"] not in starters:
                 starters[team["id"]] = starter
         return starters
+
+
+def _battery_table_rows(soup: BeautifulSoup) -> list[Any]:
+    for heading in soup.find_all("h4"):
+        if "バッテリー" not in heading.get_text(strip=True):
+            continue
+        table = heading.find_next("table")
+        if table:
+            return list(table.select("tr"))
+    return []
 
 
 def _normalize_pitcher_name(name: str) -> str:
@@ -361,19 +376,71 @@ def _pitcher_name_matches(probable: str, starter: str) -> bool:
     return left in right or right in left
 
 
-def _is_pitching_lineup(text: str) -> bool:
+_BATTERY_SEP_RE = re.compile(r"[‐\-－−–—]")
+
+
+def _starter_from_battery(text: str) -> str | None:
+    """First pitcher from a バッテリー cell: `村上　‐　坂本` or `小笠原、堀田　‐　山瀬`."""
     if not text or not text.strip():
-        return False
-    if "号" in text and "ラン" in text:
-        return False
-    return "、" in text
+        return None
+    # Homers land in 【球団】 rows with 号; never treat as battery.
+    if "号" in text or "本塁打" in text:
+        return None
+    pitcher_side = _BATTERY_SEP_RE.split(text, maxsplit=1)[0]
+    first = pitcher_side.split("、")[0].replace("　", " ").strip()
+    return first or None
 
 
 def _starter_from_lineup(text: str) -> str | None:
-    if not _is_pitching_lineup(text):
+    """Backward-compatible alias used by older call sites / tests."""
+    return _starter_from_battery(text)
+
+
+def _starter_from_playbyplay(html: str, is_home: bool) -> str | None:
+    """（先発投手） on the half our team pitches (home→表, away→裏)."""
+    soup = BeautifulSoup(html, "html.parser")
+    defend_half = _defensive_half_label(is_home)
+    for heading in soup.find_all("h5"):
+        title = heading.get_text(strip=True)
+        match = re.match(r"(\d+)回(表|裏)", title)
+        if not match or int(match.group(1)) != 1 or match.group(2) != defend_half:
+            continue
+        for element in heading.find_all_next(["tr", "h5"]):
+            if element.name == "h5":
+                break
+            row = element.get_text(" ", strip=True)
+            starter = PBP_STARTER_RE.search(row)
+            if starter:
+                return starter.group(1).strip()
+    return None
+
+
+def _parse_inning_run_cell(value: str) -> int | None:
+    """Parse one linescore cell. None means stop (should not append)."""
+    text = (value or "").strip()
+    if text in {"計", "H", "E"}:
         return None
-    first = text.split("、")[0].strip()
-    return first or None
+    if text in {"x", "X", "-", ""}:
+        return 0
+    # Walk-off marker on npb.jp, e.g. 1x / 2x
+    walkoff = re.match(r"^(\d+)x$", text, re.IGNORECASE)
+    if walkoff:
+        return int(walkoff.group(1))
+    if text.isdigit():
+        return int(text)
+    return 0
+
+
+def _trim_linescore_rhe(runs: list[int]) -> list[int]:
+    """Remove trailing R/H/E totals mistaken for extra innings."""
+    if len(runs) >= 3 and sum(runs[:-3]) == runs[-3]:
+        return runs[:-3]
+    # Regulation board padded with empty extra columns before R/H/E.
+    if len(runs) > 12 and sum(runs[:9]) == runs[9]:
+        return runs[:9]
+    if len(runs) >= 13 and sum(runs[:9]) == runs[10]:
+        return runs[:9]
+    return runs
 
 
 def first_n_runs(inning_runs: list[int], count: int = 5) -> int:
@@ -689,6 +756,28 @@ async def analyze_team_scoring(
     }
 
 
+def _parse_pitcher_pitch_count_from_box(
+    html: str, pitcher_name: str, *, is_home: bool
+) -> int | None:
+    """Read starter 球数 from npb.jp box.html pitching table."""
+    soup = BeautifulSoup(html, "html.parser")
+    for table in soup.find_all("table"):
+        headers = [th.get_text(strip=True) for th in table.find_all("th")]
+        if not any("球数" in header for header in headers):
+            continue
+        pitch_idx = next((i for i, header in enumerate(headers) if "球数" in header), None)
+        if pitch_idx is None:
+            continue
+        for row in table.find_all("tr"):
+            cells = [cell.get_text(" ", strip=True) for cell in row.select("th, td")]
+            if len(cells) <= pitch_idx:
+                continue
+            name_cell = cells[1] if len(cells) > 1 else cells[0]
+            if _pitcher_name_matches(pitcher_name, name_cell):
+                return _parse_box_int(cells[pitch_idx])
+    return None
+
+
 def _build_pitcher_start_row(
     meta: dict[str, Any],
     parsed: dict[str, Any],
@@ -697,6 +786,7 @@ def _build_pitcher_start_row(
     *,
     pitcher_runs_by_inning: list[int] | None = None,
     innings_pitched: str | None = None,
+    pitch_count: int | None = None,
 ) -> dict[str, Any]:
     is_home = parsed["homeTeamId"] == team_id
     side = "home" if is_home else "away"
@@ -732,6 +822,7 @@ def _build_pitcher_start_row(
         "over15": first_five_allowed > 1.5,
         "over25": first_five_allowed > 2.5,
         "inningsPitched": innings_pitched,
+        "pitchCount": pitch_count,
     }
 
 
@@ -764,15 +855,35 @@ async def analyze_pitcher_starts(
         is_home = parsed["homeTeamId"] == team_id
         side = "home" if is_home else "away"
         starter = parsed.get(f"{side}Starter")
-        if not starter or not _pitcher_name_matches(pitcher_name, starter):
+        matched = bool(starter and _pitcher_name_matches(pitcher_name, starter))
+        pbp_html: str | None = None
+        box_html: str | None = None
+        if not matched:
+            pbp_html = await client.fetch_playbyplay(meta["href"])
+            pbp_starter = _starter_from_playbyplay(pbp_html, is_home) if pbp_html else None
+            if pbp_starter and _pitcher_name_matches(pitcher_name, pbp_starter):
+                matched = True
+            else:
+                probable = meta.get("homeProbablePitcher" if is_home else "awayProbablePitcher")
+                if not probable or not _pitcher_name_matches(pitcher_name, probable):
+                    return None
+                matched = True
+        if not matched:
             return None
-        pbp_html = await client.fetch_playbyplay(meta["href"])
+        if pbp_html is None:
+            pbp_html = await client.fetch_playbyplay(meta["href"])
+        box_html = await client.fetch_boxscore(meta["href"])
         opp_innings = parsed["awayInnings" if is_home else "homeInnings"]
         pbp_runs = None
         innings_pitched = None
+        pitch_count = None
         if pbp_html:
             pbp_runs, innings_pitched = _parse_pitcher_runs_from_playbyplay(
                 pbp_html, is_home, pitcher_name, opp_innings
+            )
+        if box_html:
+            pitch_count = _parse_pitcher_pitch_count_from_box(
+                box_html, pitcher_name, is_home=is_home
             )
         return _build_pitcher_start_row(
             meta,
@@ -781,6 +892,7 @@ async def analyze_pitcher_starts(
             pitcher_name,
             pitcher_runs_by_inning=pbp_runs,
             innings_pitched=innings_pitched,
+            pitch_count=pitch_count,
         )
 
     rows: list[dict[str, Any]] = []
@@ -1239,6 +1351,21 @@ async def _build_side_panel(
     }
 
 
+def _lineups_confirmed_for_date(
+    lineups: dict[str, Any] | None, *, matchup_date: str | None
+) -> bool:
+    if not lineups or not matchup_date:
+        return False
+    target = matchup_date[:10]
+    for side in ("away", "home"):
+        side_data = lineups.get(side) or {}
+        if (side_data.get("source") or "").strip().lower() != "confirmed":
+            return False
+        if (side_data.get("sourceDate") or "")[:10] != target:
+            return False
+    return True
+
+
 async def rebuild_pitcher_dependent_fields(
     data: dict[str, Any], *, game_count: int = 10
 ) -> dict[str, Any]:
@@ -1249,23 +1376,9 @@ async def rebuild_pitcher_dependent_fields(
         return data
 
     matchup_meta = data.get("matchup") or {}
-    lineup_matchup = {
-        "date": matchup_meta.get("date"),
-        "gameDate": matchup_meta.get("gameDate"),
-        "gameSno": matchup_meta.get("gameSno"),
-        "status": matchup_meta.get("status"),
-        "stadium": matchup_meta.get("stadium"),
-        "away": {
-            "teamId": away["teamId"],
-            "teamName": away.get("teamName") or "",
-            "probablePitcher": away.get("probablePitcher"),
-        },
-        "home": {
-            "teamId": home["teamId"],
-            "teamName": home.get("teamName") or "",
-            "probablePitcher": home.get("probablePitcher"),
-        },
-    }
+    matchup_date = (matchup_meta.get("date") or "")[:10]
+    matchup_status = matchup_meta.get("status")
+    existing_lineups = data.get("startingLineups")
 
     client = NpbClient()
     try:
@@ -1279,10 +1392,27 @@ async def rebuild_pitcher_dependent_fields(
                 client, name, int(panel["teamId"]), game_count, scan_limit=40
             )
 
+        async def _lineups_block() -> dict[str, Any] | None:
+            if not npb_lineups_need_rebuild(
+                existing_lineups,
+                matchup_date=matchup_date or None,
+                matchup_status=matchup_status,
+            ):
+                return existing_lineups
+            focus_id = int(data.get("focusTeamId") or away["teamId"])
+            matchup = await fetch_next_matchup(client, focus_id)
+            if not matchup:
+                return existing_lineups
+            rebuilt = await fetch_matchup_starting_lineups(client, matchup)
+            if _lineups_confirmed_for_date(existing_lineups, matchup_date=matchup_date):
+                if not _lineups_confirmed_for_date(rebuilt, matchup_date=matchup_date):
+                    return existing_lineups
+            return rebuilt
+
         away_pa, home_pa, starting_lineups = await asyncio.gather(
             _pitcher_block(away),
             _pitcher_block(home),
-            fetch_matchup_starting_lineups(client, lineup_matchup),
+            _lineups_block(),
         )
     finally:
         await client.close()
@@ -1292,7 +1422,8 @@ async def rebuild_pitcher_dependent_fields(
     data = dict(data)
     data["away"] = strip_panel_internals(away)
     data["home"] = strip_panel_internals(home)
-    data["startingLineups"] = starting_lineups
+    if starting_lineups is not None:
+        data["startingLineups"] = starting_lineups
     data["situational"] = build_matchup_situational(data["away"], data["home"])
     return data
 
@@ -1333,16 +1464,16 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
 
         away_id = matchup["away"]["teamId"]
         home_id = matchup["home"]["teamId"]
-        away_panel, home_panel, away_table, home_table = await asyncio.gather(
+        away_panel, home_panel, away_table, home_table, starting_lineups = await asyncio.gather(
             _build_side_panel(client, matchup["away"], game_count),
             _build_side_panel(client, matchup["home"], game_count),
             fetch_inning_comparison(client, away_id),
             fetch_inning_comparison(client, home_id),
+            fetch_matchup_starting_lineups(client, matchup),
         )
         situational = build_matchup_situational(away_panel, home_panel)
         away_panel = strip_panel_internals(away_panel)
         home_panel = strip_panel_internals(home_panel)
-        starting_lineups = {"away": {"batters": []}, "home": {"batters": []}}
     finally:
         await client.close()
 

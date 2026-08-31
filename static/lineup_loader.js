@@ -10,6 +10,11 @@ window.LineupLoader = (function () {
   let lineupPollTimer = null;
   let lineupPollAttempts = 0;
   let lastGoodLineups = null;
+  let lastLineupKey = null;
+
+  function lineupKey(league, teamId, games) {
+    return `${league || ""}:${teamId || ""}:${games || ""}`;
+  }
 
   function lineupsReady(lineups) {
     const away = lineups?.away?.batters?.length ?? 0;
@@ -80,6 +85,13 @@ window.LineupLoader = (function () {
     lineups,
     { apiPath, league, teamId, games, fetchWithTimeout, force = false, matchup = null } = {}
   ) {
+    const key = lineupKey(league, teamId, games);
+    if (key !== lastLineupKey) {
+      lastLineupKey = key;
+      lastGoodLineups = null;
+      clearLineupPollTimer();
+    }
+
     const needsLive =
       force || (SiteConfig.lineupsNeedLiveRefresh && SiteConfig.lineupsNeedLiveRefresh(lineups, matchup));
     const useLiveOnStatic =
@@ -93,16 +105,13 @@ window.LineupLoader = (function () {
         ? null
         : apiPath;
 
-    if (!force && lineupsReady(lineups) && !needsLive) {
-      lastGoodLineups = lineups;
-      syncLineup(lineups);
-      clearLineupPollTimer();
-      return;
-    }
-
     if (lineupsReady(lineups)) {
       lastGoodLineups = lineups;
       syncLineup(lineups);
+      if (!force && !needsLive) {
+        clearLineupPollTimer();
+        return;
+      }
     } else if (lineupsReady(lastGoodLineups)) {
       syncLineup(lastGoodLineups);
     } else {
@@ -121,7 +130,7 @@ window.LineupLoader = (function () {
         teamId,
         games,
         fetchWithTimeout,
-        force: force || needsLive,
+        force: Boolean(force && !lineupsReady(lineups)),
       });
     }
   }

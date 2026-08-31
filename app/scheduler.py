@@ -115,6 +115,9 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         "gameDate": matchup.get("gameDate"),
         "gamePk": matchup.get("gamePk"),
         "status": matchup.get("status"),
+        "stadium": matchup.get("stadium"),
+        "timeTaiwan": matchup.get("timeTaiwan"),
+        "timeLocal": matchup.get("timeLocal"),
     }
 
     if {old_away, old_home} == {new_away, new_home}:
@@ -162,8 +165,10 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         data.pop("aTable", None)
         data.pop("situational", None)
 
+    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = any(
+    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
         _name(data.get(side))
         and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
         for side in ("away", "home")
@@ -177,6 +182,7 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
                 "MLB pitcher rebuild failed for team %s (header kept)", team_id
             )
 
+    data["cacheVersion"] = CACHE_VERSION
     await store_matchup(team_id, games, data)
     logger.info("Refreshed MLB matchup header for team %s", team_id)
 
@@ -195,6 +201,7 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
             await refresh_matchup_header(team_id, games)
         else:
             data = await analyze_matchup(team_id, games, lite=False)
+            data["cacheVersion"] = CACHE_VERSION
             await store_matchup(team_id, games, data)
             if a_table := data.get("aTable"):
                 await store_a_table(team_id, a_table)

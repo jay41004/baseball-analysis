@@ -88,6 +88,8 @@ def parse_stats_pitching(html: str, *, game_sno: int, year: int) -> list[dict[st
                     "InningPitchedCnt": row.get("inningPitchedCnt"),
                     "RunCnt": row.get("runCnt"),
                     "EarnedRunCnt": row.get("earnedRunCnt"),
+                    "PitchCnt": row.get("pitchCnt"),
+                    "BallCnt": row.get("ballCnt"),
                 }
             )
     return pitching

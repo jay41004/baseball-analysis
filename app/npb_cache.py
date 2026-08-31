@@ -14,7 +14,7 @@ from app.npb_display import localize_matchup_payload
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 18
+CACHE_VERSION = 21
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "npb_cache.json"
@@ -39,18 +39,16 @@ def _a_table_key(team_id: int) -> str:
 
 
 def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
-    hit = _store.get(_matchup_key(team_id, games))
-    if hit:
-        return hit
-    suffix = f":{team_id}:{games}"
-    for key, value in _store.items():
-        if key.startswith("npb:matchup:v") and key.endswith(suffix):
-            return value
-    return None
+    return _store.get(_matchup_key(team_id, games))
 
 
 def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
-    return False
+    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+
+    data = entry.get("data") or {}
+    if int(data.get("cacheVersion") or 0) < CACHE_VERSION:
+        return True
+    return pitcher_analysis_missing_pitch_counts(data)
 
 
 def get_a_table(team_id: int) -> dict[str, Any] | None:
@@ -120,17 +118,14 @@ def load_from_disk() -> None:
         if not isinstance(raw, dict):
             return
         prefix = _key_prefix()
-        legacy_prefix = f"npb:matchup:v{CACHE_VERSION - 1}:"
-        current: dict[str, dict[str, Any]] = {}
-        migrated = False
-        for key, value in raw.items():
-            if key.startswith(prefix):
-                current[key] = value
-            elif key.startswith(legacy_prefix):
-                current[f"{prefix}{key[len(legacy_prefix):]}"] = value
-                migrated = True
+        # Do not migrate older payloads — parser fixes require a full rebuild.
+        current = {
+            key: value
+            for key, value in raw.items()
+            if isinstance(value, dict) and key.startswith(prefix)
+        }
         _store.update(current)
-        if migrated or len(current) != len(raw):
+        if len(current) != len(raw):
             save_to_disk()
     except (json.JSONDecodeError, OSError):
         pass

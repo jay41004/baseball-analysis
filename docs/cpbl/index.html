@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>中華職棒 前五局對戰分析</title>
-  <link rel="stylesheet" href="../static/style.css?v=24" />
+  <link rel="stylesheet" href="../static/style.css?v=26" />
 </head>
 <body>
   <div class="page">
@@ -21,10 +21,11 @@
       </nav>
     </header>
 
-    <section class="controls card">
-      <label for="team-select">選擇球隊（6 球團）</label>
+    <section class="controls card game-picker-panel">
+      <div id="game-picker-root"></div>
+      <label class="visually-hidden" for="team-select">選擇球隊（備用）</label>
       <div class="control-row">
-        <select id="team-select">
+        <select id="team-select" class="visually-hidden" aria-hidden="true" tabindex="-1">
           <option value="">載入中...</option>
         </select>
         <label class="inline-label" for="game-count">場數</label>
@@ -52,11 +53,12 @@
   </div>
 
 <script>window.SITE_STATIC=true;</script>
-  <script src="../static/api_utils.js?v=7"></script>
+  <script src="../static/api_utils.js?v=12"></script>
+  <script src="../static/game_picker.js?v=4"></script>
   <script src="../static/lineup.js?v=13"></script>
-  <script src="../static/lineup_loader.js?v=4"></script>
+  <script src="../static/lineup_loader.js?v=6"></script>
   <script src="../static/a_table.js?v=11"></script>
   <script src="../static/situational.js?v=1"></script>
-  <script src="../static/cpbl.js?v=25"></script>
+  <script src="../static/cpbl.js?v=31"></script>
 </body>
 </html>

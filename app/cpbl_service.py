@@ -26,6 +26,7 @@ from app.cpbl_vs_pitcher import (
     parse_pitcher_acnt_map,
     schedule_vs_pitcher_refresh,
 )
+from app.pitcher_rows import pitch_count_from_cpbl_line
 from app.cpbl_stats import fetch_stats_box, fetch_stats_schedule
 from app.cpbl_teams import TEAM_BY_ID, list_teams, team_by_code, team_zh
 from app.inning_comparison import (
@@ -1235,6 +1236,8 @@ class CpblClient:
                     logger.exception("CPBL near-term schedule sync failed")
 
         games = _shared_schedule
+        if not isinstance(games, list):
+            return []
         repaired = False
         for game in games:
             before = game.get("status")
@@ -1478,6 +1481,7 @@ class CpblClient:
 
         if not parsed:
             return None
+        await _enrich_box_pitch_counts(self, parsed, game_sno, year)
         schedule = await self.fetch_schedule_pool()
         for game in schedule:
             if game.get("gameSno") == game_sno:
@@ -1488,6 +1492,46 @@ class CpblClient:
 
         _shared_box_cache[cache_key] = parsed
         return parsed
+
+
+def _merge_stats_pitch_counts(
+    pitching: list[dict[str, Any]], stats_pitching: list[dict[str, Any]]
+) -> None:
+    if not pitching or not stats_pitching:
+        return
+    by_name: dict[str, dict[str, Any]] = {}
+    for row in stats_pitching:
+        name = (row.get("PitcherName") or "").strip()
+        if name:
+            by_name[name] = row
+    for row in pitching:
+        name = (row.get("PitcherName") or "").strip()
+        if not name:
+            continue
+        stats_row = by_name.get(name)
+        if not stats_row:
+            for key, value in by_name.items():
+                if _pitcher_name_matches(name, key):
+                    stats_row = value
+                    break
+        if not stats_row:
+            continue
+        for key in ("PitchCnt", "pitchCnt", "BallCnt", "ballCnt"):
+            if row.get(key) is None and stats_row.get(key) is not None:
+                row[key] = stats_row.get(key)
+
+
+async def _enrich_box_pitch_counts(
+    client: CpblClient, parsed: dict[str, Any], game_sno: int | str, year: int
+) -> None:
+    from app.cpbl_stats import _fetch_stats_game_html, parse_stats_pitching
+
+    try:
+        html = await _fetch_stats_game_html(client._http, int(game_sno), int(year))
+        stats_pitching = parse_stats_pitching(html, game_sno=int(game_sno), year=int(year))
+        _merge_stats_pitch_counts(parsed.get("pitching") or [], stats_pitching)
+    except Exception:
+        logger.debug("CPBL pitch-count enrich failed for game %s", game_sno, exc_info=True)
 
 
 async def fetch_cpbl_teams() -> list[dict[str, Any]]:
@@ -1823,6 +1867,21 @@ def _pitcher_row_from_box(
     runs_by_inning = _parse_pitcher_runs_from_live_log(
         live_log, is_home, pitcher_name, opp_innings
     )
+    line = _starter_pitching_line(box, team_id, pitcher_name)
+    earned_runs = None
+    run_cnt = None
+    if line:
+        earned_runs = line.get("EarnedRunCnt")
+        if earned_runs is None:
+            earned_runs = line.get("RunCnt")
+        run_cnt = line.get("RunCnt")
+    # Non-empty liveLog that never matches the starter yields all zeros while
+    # the pitching line still has ER/R — fall back to innings-pitched heuristic.
+    if used_live_log and sum(runs_by_inning) == 0:
+        er_val = int(earned_runs or 0)
+        r_val = int(run_cnt or 0)
+        if er_val > 0 or r_val > 0:
+            used_live_log = False
     runs_by_inning = _pitcher_runs_with_starter_innings(
         box,
         team_id,
@@ -1844,13 +1903,7 @@ def _pitcher_row_from_box(
         team_score = sum(box[f"{side}Innings"])
         opponent_score = sum(box[f"{opp_side}Innings"])
 
-    line = _starter_pitching_line(box, team_id, pitcher_name)
     innings_pitched = line.get("InningPitchedCnt") if line else None
-    earned_runs = None
-    if line:
-        earned_runs = line.get("EarnedRunCnt")
-        if earned_runs is None:
-            earned_runs = line.get("RunCnt")
 
     return {
         "date": meta.get("date"),
@@ -1869,6 +1922,7 @@ def _pitcher_row_from_box(
         "over25": first_five_allowed > 2.5,
         "inningsPitched": innings_pitched,
         "earnedRuns": earned_runs,
+        "pitchCount": pitch_count_from_cpbl_line(line),
         "result": _game_result(team_score, opponent_score),
     }
 

@@ -44,7 +44,7 @@
   {
     "id": 7,
     "nameJa": "ソフトバンク",
-    "nameZh": "福岡软银",
+    "nameZh": "福岡軟銀",
     "abbreviation": "H",
     "league": "PL"
   },
@@ -58,28 +58,28 @@
   {
     "id": 9,
     "nameJa": "オリックス",
-    "nameZh": "欧力士",
+    "nameZh": "歐力士",
     "abbreviation": "B",
     "league": "PL"
   },
   {
     "id": 10,
     "nameJa": "楽天",
-    "nameZh": "东北乐天",
+    "nameZh": "東北樂天",
     "abbreviation": "E",
     "league": "PL"
   },
   {
     "id": 11,
     "nameJa": "西武",
-    "nameZh": "埼玉西武",
+    "nameZh": "西武",
     "abbreviation": "L",
     "league": "PL"
   },
   {
     "id": 12,
     "nameJa": "ロッテ",
-    "nameZh": "千叶罗德",
+    "nameZh": "千葉羅德",
     "abbreviation": "M",
     "league": "PL"
   }
