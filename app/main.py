@@ -148,6 +148,66 @@ async def _schedule_matchup_refresh(factory, *, force: bool) -> bool:
     return False
 
 
+async def _background_matchup_refresh(
+    *,
+    refresh_header,
+    full_refresh_factory,
+    team_id: int,
+    games: int,
+    force: bool,
+) -> None:
+    try:
+        await refresh_header(team_id, games)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Matchup header refresh failed for team %s", team_id
+        )
+    await _schedule_matchup_refresh(full_refresh_factory, force=force)
+
+
+def _mlb_needs_timing_patch(cached: dict | None) -> bool:
+    if not cached:
+        return False
+    matchup_meta = (cached.get("data") or {}).get("matchup") or {}
+    return bool(
+        matchup_meta.get("gameDate")
+        and (not matchup_meta.get("stadium") or not matchup_meta.get("timeTaiwan"))
+    )
+
+
+def _kick_matchup_refresh_if_needed(
+    *,
+    team_id: int,
+    games: int,
+    force: bool,
+    cached: dict | None,
+    needs_refresh: bool,
+    needs_timing_patch: bool,
+    is_refreshing_fn,
+    refresh_header,
+    full_refresh_factory,
+) -> bool:
+    """Schedule header + panel refresh in background; return refreshing flag."""
+    if not (needs_refresh or needs_timing_patch):
+        return (not is_cloud_lite()) and is_refreshing_fn(team_id, games)
+
+    if is_refreshing_fn(team_id, games):
+        return True
+
+    _schedule(
+        _background_matchup_refresh(
+            refresh_header=refresh_header,
+            full_refresh_factory=full_refresh_factory,
+            team_id=team_id,
+            games=games,
+            force=force,
+        )
+    )
+    return True
+
+
 def _attach_a_table(
     payload: dict,
     team_id: int,
@@ -403,31 +463,25 @@ async def api_matchup(
         from app.scheduler import refresh_matchup_header
 
         cached = get_matchup(team_id, games)
-        needs_refresh = force or cached is None or is_stale(cached["updatedAt"])
-        if cached and not force:
-            matchup_meta = (cached.get("data") or {}).get("matchup") or {}
-            if matchup_meta.get("gameDate") and (
-                not matchup_meta.get("stadium") or not matchup_meta.get("timeTaiwan")
-            ):
-                await refresh_matchup_header(team_id, games)
-                cached = get_matchup(team_id, games)
-
-        if needs_refresh:
-            # Always patch next-game header first so Live/In-Progress shows
-            # immediately (full panel rebuild can finish in the background).
-            await refresh_matchup_header(team_id, games)
-            cached = get_matchup(team_id, games)
-            if is_cloud_lite():
-                pass
-            elif not mlb_is_refreshing(team_id, games):
-                await _schedule_matchup_refresh(
-                    lambda: refresh_matchup(team_id, games), force=force
-                )
+        needs_refresh = (
+            force
+            or cached is None
+            or is_stale(cached["updatedAt"])
+        )
+        needs_timing_patch = _mlb_needs_timing_patch(cached)
+        refreshing = _kick_matchup_refresh_if_needed(
+            team_id=team_id,
+            games=games,
+            force=force,
+            cached=cached,
+            needs_refresh=needs_refresh,
+            needs_timing_patch=needs_timing_patch,
+            is_refreshing_fn=mlb_is_refreshing,
+            refresh_header=refresh_matchup_header,
+            full_refresh_factory=lambda: refresh_matchup(team_id, games),
+        )
 
         if cached:
-            refreshing = (not is_cloud_lite()) and (
-                needs_refresh or mlb_is_refreshing(team_id, games)
-            )
             return _wrap_mlb_matchup(team_id, cached, refreshing=refreshing)
         return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
     except ValueError as exc:
@@ -452,25 +506,17 @@ async def api_npb_matchup(
             or npb_is_stale(cached["updatedAt"])
             or npb_cache_needs_upgrade(cached)
         )
-
-        refreshing = False
-        if needs_refresh:
-            try:
-                await refresh_npb_header(team_id, games)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).exception("NPB header refresh failed")
-            cached = get_npb_matchup(team_id, games)
-            if is_cloud_lite():
-                pass
-            elif not npb_is_refreshing(team_id, games):
-                started = await _schedule_matchup_refresh(
-                    lambda: refresh_npb_matchup(team_id, games), force=force
-                )
-                refreshing = started or npb_is_refreshing(team_id, games)
-            else:
-                refreshing = npb_is_refreshing(team_id, games)
+        refreshing = _kick_matchup_refresh_if_needed(
+            team_id=team_id,
+            games=games,
+            force=force,
+            cached=cached,
+            needs_refresh=needs_refresh,
+            needs_timing_patch=False,
+            is_refreshing_fn=npb_is_refreshing,
+            refresh_header=refresh_npb_header,
+            full_refresh_factory=lambda: refresh_npb_matchup(team_id, games),
+        )
 
         if cached:
             return await _wrap_npb_matchup(team_id, cached, refreshing=refreshing)
@@ -514,25 +560,17 @@ async def api_cpbl_matchup(
             or cpbl_is_stale(cached["updatedAt"])
             or cpbl_cache_needs_upgrade(cached)
         )
-
-        refreshing = False
-        if needs_refresh:
-            try:
-                await refresh_cpbl_header(team_id, games)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).exception("CPBL header refresh failed")
-            cached = get_cpbl_matchup(team_id, games)
-            if is_cloud_lite():
-                pass
-            elif not cpbl_is_refreshing(team_id, games):
-                started = await _schedule_matchup_refresh(
-                    lambda: refresh_cpbl_matchup(team_id, games), force=force
-                )
-                refreshing = started or cpbl_is_refreshing(team_id, games)
-            else:
-                refreshing = cpbl_is_refreshing(team_id, games)
+        refreshing = _kick_matchup_refresh_if_needed(
+            team_id=team_id,
+            games=games,
+            force=force,
+            cached=cached,
+            needs_refresh=needs_refresh,
+            needs_timing_patch=False,
+            is_refreshing_fn=cpbl_is_refreshing,
+            refresh_header=refresh_cpbl_header,
+            full_refresh_factory=lambda: refresh_cpbl_matchup(team_id, games),
+        )
 
         if cached:
             return _wrap_cpbl_matchup(team_id, cached, refreshing=refreshing)

@@ -491,8 +491,7 @@ async function loadTeams() {
 }
 
 function isDataReady(data) {
-  if (data.loading) return false;
-  return (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
+  return ApiUtils.isMatchupDataReady(data);
 }
 
 function setBusy(isBusy, message) {

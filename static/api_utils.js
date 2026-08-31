@@ -131,8 +131,8 @@ window.ApiUtils = (function () {
   }
 
   async function fetchJson(url, fetchFn, options = {}) {
-    const retries = SiteConfig.isStatic ? 2 : options.retries ?? 12;
-    const retryMs = options.retryMs ?? 5000;
+    const retries = SiteConfig.isStatic ? 1 : options.retries ?? 8;
+    const retryMs = options.retryMs ?? 3000;
     const onWaiting = options.onWaiting;
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -161,7 +161,29 @@ window.ApiUtils = (function () {
     );
   }
 
-  return { readJson, fetchJson, isHtmlBody };
+  function matchupHasHeader(data) {
+    const date = data?.matchup?.date;
+    const away = data?.away?.teamName;
+    const home = data?.home?.teamName;
+    return Boolean(
+      date &&
+        date !== "—" &&
+        away &&
+        away !== "載入中…" &&
+        home &&
+        home !== "載入中…"
+    );
+  }
+
+  function isMatchupDataReady(data) {
+    if (!data || data.loading) return false;
+    const hasGames =
+      (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
+    if (hasGames) return true;
+    return matchupHasHeader(data);
+  }
+
+  return { readJson, fetchJson, isHtmlBody, isMatchupDataReady, matchupHasHeader };
 })();
 
 /** Shared matchup header helpers (today/tomorrow labels, starters). */

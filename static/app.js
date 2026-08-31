@@ -492,12 +492,7 @@ async function loadTeams() {
 }
 
 function isDataReady(data) {
-  if (data.loading) return false;
-  const hasGames = (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
-  if (hasGames) return true;
-  // Cloud header-only updates can return empty panels — do not poll forever.
-  if (data.refreshing) return false;
-  return Boolean(data.matchup?.date && data.away?.teamName && data.home?.teamName);
+  return ApiUtils.isMatchupDataReady(data);
 }
 
 function setBusy(isBusy, message) {
@@ -549,25 +544,23 @@ function teamGamesMissingScores(data) {
 }
 
 function needsFreshData(data, games) {
-  if (isDataReady(data)) {
-    if (teamGamesMissingScores(data)) {
+  if (data.refreshing) return false;
+  if (!isDataReady(data)) {
+    if (!data.cacheVersion || data.cacheVersion < expectedCacheVersion) {
       return true;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    for (const side of ["away", "home"]) {
+      for (const game of data[side]?.games ?? []) {
+        if (game.date > today) return true;
+        if (game.result == null && game.firstFiveRuns === 0 && game.opponentStarter == null) {
+          return true;
+        }
+      }
     }
     return false;
   }
-  if (!data.cacheVersion || data.cacheVersion < expectedCacheVersion) {
-    return true;
-  }
-  const today = new Date().toISOString().slice(0, 10);
-  for (const side of ["away", "home"]) {
-    for (const game of data[side]?.games ?? []) {
-      if (game.date > today) return true;
-      if (game.result == null && game.firstFiveRuns === 0 && game.opponentStarter == null) {
-        return true;
-      }
-    }
-  }
-  return false;
+  return teamGamesMissingScores(data);
 }
 
 async function loadMeta() {
