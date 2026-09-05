@@ -1,0 +1,82 @@
+{
+  "generatedAt": "2026-09-05T17:40:39.003920+00:00",
+  "cpblApi": {
+    "base": "https://cpbl.com.tw",
+    "ok": false,
+    "status": null,
+    "detail": "no csrf",
+    "schedulePage": 403
+  },
+  "cpbl": {
+    "league": "cpbl",
+    "teams": 6,
+    "thinPanels": 0,
+    "missingPitchers": 6,
+    "issues": [],
+    "warnings": [
+      "cpbl team 1: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "cpbl team 2: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "cpbl team 3: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "cpbl team 4: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "cpbl team 5: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "cpbl team 6: Scheduled 2026-09-06 missing starter(s) away=None home=None"
+    ],
+    "liveCross": {
+      "issueCount": 0,
+      "warningCount": 0
+    },
+    "missingPitchersAfterRepair": 0
+  },
+  "npb": {
+    "league": "npb",
+    "teams": 12,
+    "thinPanels": 0,
+    "missingPitchers": 12,
+    "issues": [],
+    "warnings": [
+      "npb team 10: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 11: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 12: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 1: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 2: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 3: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 4: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 5: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 6: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 7: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 8: Scheduled 2026-09-06 missing starter(s) away=None home=None",
+      "npb team 9: Scheduled 2026-09-06 missing starter(s) away=None home=None"
+    ]
+  },
+  "mlb": {
+    "league": "mlb",
+    "teams": 30,
+    "thinPanels": 0,
+    "missingPitchers": 0,
+    "issues": [],
+    "warnings": [
+      "mlb team 133: home J.P. Crawford recent3Avg='.714' very high for 3 games",
+      "mlb team 133: home J.P. Crawford recent5Avg='.667' very high for 3 games",
+      "mlb team 136: home J.P. Crawford recent3Avg='.714' very high for 3 games",
+      "mlb team 136: home J.P. Crawford recent5Avg='.667' very high for 3 games"
+    ]
+  },
+  "repair": {
+    "repairedTeams": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "fullRefreshedTeams": [],
+    "failedTeams": [],
+    "issuesRemaining": 0,
+    "afterIssues": [],
+    "afterOk": true
+  },
+  "critical": [],
+  "liveSoftIssues": [],
+  "ok": true
+}

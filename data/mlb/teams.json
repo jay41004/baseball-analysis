@@ -1,0 +1,212 @@
+[
+  {
+    "id": 139,
+    "name": "Tampa Bay Rays",
+    "nameZh": "光芒",
+    "abbreviation": "TB",
+    "teamName": "Rays"
+  },
+  {
+    "id": 144,
+    "name": "Atlanta Braves",
+    "nameZh": "勇士",
+    "abbreviation": "ATL",
+    "teamName": "Braves"
+  },
+  {
+    "id": 120,
+    "name": "Washington Nationals",
+    "nameZh": "國民",
+    "abbreviation": "WSH",
+    "teamName": "Nationals"
+  },
+  {
+    "id": 121,
+    "name": "New York Mets",
+    "nameZh": "大都會",
+    "abbreviation": "NYM",
+    "teamName": "Mets"
+  },
+  {
+    "id": 108,
+    "name": "Los Angeles Angels",
+    "nameZh": "天使",
+    "abbreviation": "LAA",
+    "teamName": "Angels"
+  },
+  {
+    "id": 117,
+    "name": "Houston Astros",
+    "nameZh": "太空人",
+    "abbreviation": "HOU",
+    "teamName": "Astros"
+  },
+  {
+    "id": 114,
+    "name": "Cleveland Guardians",
+    "nameZh": "守護者",
+    "abbreviation": "CLE",
+    "teamName": "Guardians"
+  },
+  {
+    "id": 112,
+    "name": "Chicago Cubs",
+    "nameZh": "小熊",
+    "abbreviation": "CHC",
+    "teamName": "Cubs"
+  },
+  {
+    "id": 137,
+    "name": "San Francisco Giants",
+    "nameZh": "巨人",
+    "abbreviation": "SF",
+    "teamName": "Giants"
+  },
+  {
+    "id": 135,
+    "name": "San Diego Padres",
+    "nameZh": "教士",
+    "abbreviation": "SD",
+    "teamName": "Padres"
+  },
+  {
+    "id": 136,
+    "name": "Seattle Mariners",
+    "nameZh": "水手",
+    "abbreviation": "SEA",
+    "teamName": "Mariners"
+  },
+  {
+    "id": 147,
+    "name": "New York Yankees",
+    "nameZh": "洋基",
+    "abbreviation": "NYY",
+    "teamName": "Yankees"
+  },
+  {
+    "id": 134,
+    "name": "Pittsburgh Pirates",
+    "nameZh": "海盜",
+    "abbreviation": "PIT",
+    "teamName": "Pirates"
+  },
+  {
+    "id": 145,
+    "name": "Chicago White Sox",
+    "nameZh": "白襪",
+    "abbreviation": "CWS",
+    "teamName": "White Sox"
+  },
+  {
+    "id": 118,
+    "name": "Kansas City Royals",
+    "nameZh": "皇家",
+    "abbreviation": "KC",
+    "teamName": "Royals"
+  },
+  {
+    "id": 113,
+    "name": "Cincinnati Reds",
+    "nameZh": "紅人",
+    "abbreviation": "CIN",
+    "teamName": "Reds"
+  },
+  {
+    "id": 111,
+    "name": "Boston Red Sox",
+    "nameZh": "紅襪",
+    "abbreviation": "BOS",
+    "teamName": "Red Sox"
+  },
+  {
+    "id": 138,
+    "name": "St. Louis Cardinals",
+    "nameZh": "紅雀",
+    "abbreviation": "STL",
+    "teamName": "Cardinals"
+  },
+  {
+    "id": 116,
+    "name": "Detroit Tigers",
+    "nameZh": "老虎",
+    "abbreviation": "DET",
+    "teamName": "Tigers"
+  },
+  {
+    "id": 115,
+    "name": "Colorado Rockies",
+    "nameZh": "落磯",
+    "abbreviation": "COL",
+    "teamName": "Rockies"
+  },
+  {
+    "id": 141,
+    "name": "Toronto Blue Jays",
+    "nameZh": "藍鳥",
+    "abbreviation": "TOR",
+    "teamName": "Blue Jays"
+  },
+  {
+    "id": 143,
+    "name": "Philadelphia Phillies",
+    "nameZh": "費城人",
+    "abbreviation": "PHI",
+    "teamName": "Phillies"
+  },
+  {
+    "id": 140,
+    "name": "Texas Rangers",
+    "nameZh": "遊騎兵",
+    "abbreviation": "TEX",
+    "teamName": "Rangers"
+  },
+  {
+    "id": 133,
+    "name": "Athletics",
+    "nameZh": "運動家",
+    "abbreviation": "ATH",
+    "teamName": "Athletics"
+  },
+  {
+    "id": 119,
+    "name": "Los Angeles Dodgers",
+    "nameZh": "道奇",
+    "abbreviation": "LAD",
+    "teamName": "Dodgers"
+  },
+  {
+    "id": 158,
+    "name": "Milwaukee Brewers",
+    "nameZh": "釀酒人",
+    "abbreviation": "MIL",
+    "teamName": "Brewers"
+  },
+  {
+    "id": 110,
+    "name": "Baltimore Orioles",
+    "nameZh": "金鶯",
+    "abbreviation": "BAL",
+    "teamName": "Orioles"
+  },
+  {
+    "id": 142,
+    "name": "Minnesota Twins",
+    "nameZh": "雙城",
+    "abbreviation": "MIN",
+    "teamName": "Twins"
+  },
+  {
+    "id": 109,
+    "name": "Arizona Diamondbacks",
+    "nameZh": "響尾蛇",
+    "abbreviation": "AZ",
+    "teamName": "D-backs"
+  },
+  {
+    "id": 146,
+    "name": "Miami Marlins",
+    "nameZh": "馬林魚",
+    "abbreviation": "MIA",
+    "teamName": "Marlins"
+  }
+]

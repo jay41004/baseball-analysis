@@ -1,0 +1,1607 @@
+{
+  "focusTeamId": 2,
+  "matchup": {
+    "date": "2026-09-06",
+    "gameDate": "2026-09-06T18:00:00+08:00",
+    "gameSno": 314,
+    "status": "Scheduled",
+    "stadium": "亞太主"
+  },
+  "away": {
+    "teamId": 6,
+    "teamName": "台鋼雄鷹",
+    "games": [
+      {
+        "date": "2026-09-05",
+        "gameSno": 310,
+        "opponent": "統一獅",
+        "opponentStarter": "喬登",
+        "isHome": false,
+        "teamScore": 0,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": []
+      },
+      {
+        "date": "2026-09-04",
+        "gameSno": 308,
+        "opponent": "統一獅",
+        "opponentStarter": "布雷克",
+        "isHome": false,
+        "teamScore": 0,
+        "opponentScore": 11,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": []
+      },
+      {
+        "date": "2026-08-30",
+        "gameSno": 298,
+        "opponent": "味全龍",
+        "opponentStarter": "蔣銲",
+        "isHome": false,
+        "teamScore": 0,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": []
+      },
+      {
+        "date": "2026-08-29",
+        "gameSno": 297,
+        "opponent": "味全龍",
+        "opponentStarter": "鋼龍",
+        "isHome": false,
+        "teamScore": 2,
+        "opponentScore": 1,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": true,
+        "scoredInnings": [
+          7
+        ]
+      },
+      {
+        "date": "2026-08-28",
+        "gameSno": 294,
+        "opponent": "味全龍",
+        "opponentStarter": "魔神龍",
+        "isHome": false,
+        "teamScore": 7,
+        "opponentScore": 4,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true,
+        "result": true,
+        "scoredInnings": [
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      },
+      {
+        "date": "2026-08-27",
+        "gameSno": 291,
+        "opponent": "富邦悍將",
+        "opponentStarter": "鈴木駿輔",
+        "isHome": false,
+        "teamScore": 2,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 2,
+        "over15": true,
+        "over25": false,
+        "result": true,
+        "scoredInnings": [
+          5
+        ]
+      },
+      {
+        "date": "2026-08-26",
+        "gameSno": 290,
+        "opponent": "富邦悍將",
+        "opponentStarter": "瑪帝斯",
+        "isHome": false,
+        "teamScore": 4,
+        "opponentScore": 5,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": [
+          2,
+          7,
+          8
+        ]
+      },
+      {
+        "date": "2026-08-19",
+        "gameSno": 273,
+        "opponent": "統一獅",
+        "opponentStarter": "獅帝芬",
+        "isHome": true,
+        "teamScore": 8,
+        "opponentScore": 6,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false,
+        "result": true,
+        "scoredInnings": [
+          4,
+          6,
+          8
+        ]
+      },
+      {
+        "date": "2026-08-18",
+        "gameSno": 271,
+        "opponent": "統一獅",
+        "opponentStarter": "銳力獅",
+        "isHome": true,
+        "teamScore": 0,
+        "opponentScore": 8,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": []
+      },
+      {
+        "date": "2026-08-15",
+        "gameSno": 267,
+        "opponent": "中信兄弟",
+        "opponentStarter": "游竣宥",
+        "isHome": false,
+        "teamScore": 11,
+        "opponentScore": 4,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": true,
+        "scoredInnings": [
+          6,
+          8
+        ]
+      }
+    ],
+    "summary": {
+      "totalGames": 10,
+      "over15": 2,
+      "under15": 8,
+      "over25": 1,
+      "under25": 9,
+      "avgRuns": 0.7,
+      "firstInningScored": 0,
+      "firstInningNoScore": 10
+    },
+    "probablePitcher": {
+      "fullName": "黃子鵬"
+    },
+    "pitcherAnalysis": {
+      "pitcherName": "黃子鵬",
+      "games": [
+        {
+          "date": "2026-08-29",
+          "gameSno": 297,
+          "opponent": "味全龍",
+          "opponentStarter": "鋼龍",
+          "isHome": false,
+          "teamScore": 2,
+          "opponentScore": 1,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            3
+          ],
+          "firstFiveRunsAllowed": 1,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 7,
+          "earnedRuns": 0,
+          "pitchCount": 107,
+          "result": true
+        },
+        {
+          "date": "2026-08-18",
+          "gameSno": 271,
+          "opponent": "統一獅",
+          "opponentStarter": "銳力獅",
+          "isHome": true,
+          "teamScore": 0,
+          "opponentScore": 8,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            6,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            6
+          ],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 5,
+          "earnedRuns": 6,
+          "pitchCount": 98,
+          "result": false
+        },
+        {
+          "date": "2026-08-11",
+          "gameSno": 257,
+          "opponent": "味全龍",
+          "opponentStarter": "梅賽鍶",
+          "isHome": true,
+          "teamScore": 4,
+          "opponentScore": 7,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            4
+          ],
+          "firstFiveRunsAllowed": 1,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 8,
+          "earnedRuns": 1,
+          "pitchCount": 98,
+          "result": false
+        },
+        {
+          "date": "2026-08-01",
+          "gameSno": 236,
+          "opponent": "富邦悍將",
+          "opponentStarter": "魔力藍",
+          "isHome": false,
+          "teamScore": 1,
+          "opponentScore": 3,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            1,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            3,
+            5,
+            6
+          ],
+          "firstFiveRunsAllowed": 2,
+          "over15": true,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 2,
+          "pitchCount": 84,
+          "result": false
+        },
+        {
+          "date": "2026-07-26",
+          "gameSno": 223,
+          "opponent": "味全龍",
+          "opponentStarter": "伍鐸",
+          "isHome": true,
+          "teamScore": 4,
+          "opponentScore": 2,
+          "firstInningRunsAllowed": 1,
+          "firstInningScored": true,
+          "runsByInning": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            1
+          ],
+          "firstFiveRunsAllowed": 1,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 1,
+          "pitchCount": 91,
+          "result": true
+        },
+        {
+          "date": "2026-07-15",
+          "gameSno": 208,
+          "opponent": "富邦悍將",
+          "opponentStarter": "威戈神",
+          "isHome": true,
+          "teamScore": 12,
+          "opponentScore": 0,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 0,
+          "pitchCount": 79,
+          "result": true
+        },
+        {
+          "date": "2026-07-08",
+          "gameSno": 194,
+          "opponent": "味全龍",
+          "opponentStarter": "蔣銲",
+          "isHome": false,
+          "teamScore": 2,
+          "opponentScore": 1,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 5,
+          "earnedRuns": 0,
+          "pitchCount": 98,
+          "result": true
+        },
+        {
+          "date": "2026-06-21",
+          "gameSno": 179,
+          "opponent": "味全龍",
+          "opponentStarter": "曾仁和",
+          "isHome": true,
+          "teamScore": 5,
+          "opponentScore": 7,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 0,
+          "pitchCount": 95,
+          "result": false
+        },
+        {
+          "date": "2026-06-13",
+          "gameSno": 161,
+          "opponent": "富邦悍將",
+          "opponentStarter": "魔力藍",
+          "isHome": false,
+          "teamScore": 9,
+          "opponentScore": 0,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 9,
+          "earnedRuns": 0,
+          "pitchCount": 93,
+          "result": true
+        },
+        {
+          "date": "2026-06-07",
+          "gameSno": 149,
+          "opponent": "味全龍",
+          "opponentStarter": "鋼龍",
+          "isHome": true,
+          "teamScore": 2,
+          "opponentScore": 1,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 7,
+          "earnedRuns": 0,
+          "pitchCount": 98,
+          "result": true
+        }
+      ],
+      "summary": {
+        "totalGames": 10,
+        "over15": 1,
+        "under15": 9,
+        "over25": 0,
+        "under25": 10,
+        "avgRuns": 0.5,
+        "firstInningScored": 1,
+        "firstInningClean": 9,
+        "inningScoredCounts": {
+          "1": 1,
+          "2": 0,
+          "3": 2,
+          "4": 1,
+          "5": 1,
+          "6": 2,
+          "7": 0,
+          "8": 0,
+          "9": 0
+        }
+      }
+    }
+  },
+  "home": {
+    "teamId": 2,
+    "teamName": "統一獅",
+    "games": [
+      {
+        "date": "2026-09-05",
+        "gameSno": 310,
+        "opponent": "台鋼雄鷹",
+        "opponentStarter": "坎南",
+        "isHome": true,
+        "teamScore": 3,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 2,
+        "over15": true,
+        "over25": false,
+        "result": true,
+        "scoredInnings": [
+          4,
+          5,
+          8
+        ]
+      },
+      {
+        "date": "2026-09-04",
+        "gameSno": 308,
+        "opponent": "台鋼雄鷹",
+        "opponentStarter": "艾速特",
+        "isHome": true,
+        "teamScore": 11,
+        "opponentScore": 0,
+        "firstInningRuns": 4,
+        "firstInningScored": true,
+        "firstFiveRuns": 5,
+        "over15": true,
+        "over25": true,
+        "result": true,
+        "scoredInnings": [
+          1,
+          5,
+          7
+        ]
+      },
+      {
+        "date": "2026-09-02",
+        "gameSno": 303,
+        "opponent": "富邦悍將",
+        "opponentStarter": "瑪帝斯",
+        "isHome": false,
+        "teamScore": 6,
+        "opponentScore": 1,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 4,
+        "over15": true,
+        "over25": true,
+        "result": true,
+        "scoredInnings": [
+          3,
+          4,
+          6,
+          7
+        ]
+      },
+      {
+        "date": "2026-09-01",
+        "gameSno": 301,
+        "opponent": "富邦悍將",
+        "opponentStarter": "魔力藍",
+        "isHome": false,
+        "teamScore": 1,
+        "opponentScore": 2,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": [
+          7
+        ]
+      },
+      {
+        "date": "2026-08-30",
+        "gameSno": 300,
+        "opponent": "樂天桃猿",
+        "opponentStarter": "陳克羿",
+        "isHome": false,
+        "teamScore": 5,
+        "opponentScore": 4,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 4,
+        "over15": true,
+        "over25": true,
+        "result": true,
+        "scoredInnings": [
+          5,
+          6
+        ]
+      },
+      {
+        "date": "2026-08-29",
+        "gameSno": 296,
+        "opponent": "樂天桃猿",
+        "opponentStarter": "林子崴",
+        "isHome": false,
+        "teamScore": 4,
+        "opponentScore": 8,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true,
+        "result": false,
+        "scoredInnings": [
+          2,
+          5,
+          8
+        ]
+      },
+      {
+        "date": "2026-08-28",
+        "gameSno": 293,
+        "opponent": "樂天桃猿",
+        "opponentStarter": "威能帝",
+        "isHome": false,
+        "teamScore": 4,
+        "opponentScore": 0,
+        "firstInningRuns": 1,
+        "firstInningScored": true,
+        "firstFiveRuns": 3,
+        "over15": true,
+        "over25": true,
+        "result": true,
+        "scoredInnings": [
+          1,
+          2,
+          7
+        ]
+      },
+      {
+        "date": "2026-08-26",
+        "gameSno": 289,
+        "opponent": "味全龍",
+        "opponentStarter": "伍鐸",
+        "isHome": true,
+        "teamScore": 1,
+        "opponentScore": 0,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 1,
+        "over15": false,
+        "over25": false,
+        "result": true,
+        "scoredInnings": [
+          4
+        ]
+      },
+      {
+        "date": "2026-08-23",
+        "gameSno": 284,
+        "opponent": "中信兄弟",
+        "opponentStarter": "游竣宥",
+        "isHome": true,
+        "teamScore": 1,
+        "opponentScore": 11,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 0,
+        "over15": false,
+        "over25": false,
+        "result": false,
+        "scoredInnings": [
+          6
+        ]
+      },
+      {
+        "date": "2026-08-22",
+        "gameSno": 281,
+        "opponent": "中信兄弟",
+        "opponentStarter": "勝騎士",
+        "isHome": true,
+        "teamScore": 5,
+        "opponentScore": 3,
+        "firstInningRuns": 0,
+        "firstInningScored": false,
+        "firstFiveRuns": 4,
+        "over15": true,
+        "over25": true,
+        "result": true,
+        "scoredInnings": [
+          3,
+          4,
+          6
+        ]
+      }
+    ],
+    "summary": {
+      "totalGames": 10,
+      "over15": 7,
+      "under15": 3,
+      "over25": 6,
+      "under25": 4,
+      "avgRuns": 2.6,
+      "firstInningScored": 2,
+      "firstInningNoScore": 8
+    },
+    "probablePitcher": {
+      "fullName": "獅帝芬"
+    },
+    "pitcherAnalysis": {
+      "pitcherName": "獅帝芬",
+      "games": [
+        {
+          "date": "2026-08-19",
+          "gameSno": 273,
+          "opponent": "台鋼雄鷹",
+          "opponentStarter": "江承諺",
+          "isHome": false,
+          "teamScore": 6,
+          "opponentScore": 8,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            4
+          ],
+          "firstFiveRunsAllowed": 1,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 5,
+          "earnedRuns": 1,
+          "pitchCount": 86,
+          "result": false
+        },
+        {
+          "date": "2026-08-12",
+          "gameSno": 258,
+          "opponent": "樂天桃猿",
+          "opponentStarter": "陳克羿",
+          "isHome": true,
+          "teamScore": 0,
+          "opponentScore": 4,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            4,
+            5
+          ],
+          "firstFiveRunsAllowed": 2,
+          "over15": true,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 2,
+          "pitchCount": 92,
+          "result": false
+        },
+        {
+          "date": "2026-08-05",
+          "gameSno": 245,
+          "opponent": "味全龍",
+          "opponentStarter": "蔣銲",
+          "isHome": false,
+          "teamScore": 0,
+          "opponentScore": 3,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            3
+          ],
+          "firstFiveRunsAllowed": 2,
+          "over15": true,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 2,
+          "pitchCount": 100,
+          "result": false
+        },
+        {
+          "date": "2026-07-28",
+          "gameSno": 227,
+          "opponent": "台鋼雄鷹",
+          "opponentStarter": "後勁",
+          "isHome": true,
+          "teamScore": 3,
+          "opponentScore": 1,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 0,
+          "pitchCount": 90,
+          "result": true
+        },
+        {
+          "date": "2026-07-22",
+          "gameSno": 215,
+          "opponent": "富邦悍將",
+          "opponentStarter": "鈴木駿輔",
+          "isHome": true,
+          "teamScore": 1,
+          "opponentScore": 3,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            6
+          ],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 2,
+          "pitchCount": 95,
+          "result": false
+        },
+        {
+          "date": "2026-07-12",
+          "gameSno": 202,
+          "opponent": "味全龍",
+          "opponentStarter": "魔神龍",
+          "isHome": true,
+          "teamScore": 11,
+          "opponentScore": 6,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [],
+          "firstFiveRunsAllowed": 0,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 0,
+          "pitchCount": 78,
+          "result": true
+        },
+        {
+          "date": "2026-07-04",
+          "gameSno": 184,
+          "opponent": "台鋼雄鷹",
+          "opponentStarter": "江承諺",
+          "isHome": false,
+          "teamScore": 5,
+          "opponentScore": 4,
+          "firstInningRunsAllowed": 1,
+          "firstInningScored": true,
+          "runsByInning": [
+            1,
+            2,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            1,
+            2,
+            3
+          ],
+          "firstFiveRunsAllowed": 4,
+          "over15": true,
+          "over25": true,
+          "inningsPitched": 5,
+          "earnedRuns": 4,
+          "pitchCount": 94,
+          "result": true
+        },
+        {
+          "date": "2026-06-18",
+          "gameSno": 169,
+          "opponent": "台鋼雄鷹",
+          "opponentStarter": "後勁",
+          "isHome": true,
+          "teamScore": 7,
+          "opponentScore": 1,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            4
+          ],
+          "firstFiveRunsAllowed": 1,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 6,
+          "earnedRuns": 0,
+          "pitchCount": 94,
+          "result": true
+        },
+        {
+          "date": "2026-06-07",
+          "gameSno": 148,
+          "opponent": "富邦悍將",
+          "opponentStarter": "李東洺",
+          "isHome": true,
+          "teamScore": 1,
+          "opponentScore": 4,
+          "firstInningRunsAllowed": 2,
+          "firstInningScored": true,
+          "runsByInning": [
+            2,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            1,
+            5
+          ],
+          "firstFiveRunsAllowed": 4,
+          "over15": true,
+          "over25": true,
+          "inningsPitched": 5,
+          "earnedRuns": 4,
+          "pitchCount": 83,
+          "result": false
+        },
+        {
+          "date": "2026-05-22",
+          "gameSno": 115,
+          "opponent": "台鋼雄鷹",
+          "opponentStarter": "艾速特",
+          "isHome": false,
+          "teamScore": 1,
+          "opponentScore": 3,
+          "firstInningRunsAllowed": 0,
+          "firstInningScored": false,
+          "runsByInning": [
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "scoredInnings": [
+            3
+          ],
+          "firstFiveRunsAllowed": 1,
+          "over15": false,
+          "over25": false,
+          "inningsPitched": 5,
+          "earnedRuns": 3,
+          "pitchCount": 99,
+          "result": false
+        }
+      ],
+      "summary": {
+        "totalGames": 10,
+        "over15": 4,
+        "under15": 6,
+        "over25": 2,
+        "under25": 8,
+        "avgRuns": 1.5,
+        "firstInningScored": 2,
+        "firstInningClean": 8,
+        "inningScoredCounts": {
+          "1": 2,
+          "2": 1,
+          "3": 3,
+          "4": 3,
+          "5": 2,
+          "6": 1,
+          "7": 0,
+          "8": 0,
+          "9": 0
+        }
+      }
+    }
+  },
+  "aTable": {
+    "away": {
+      "teamName": "台鋼雄鷹",
+      "recent5": {
+        "gameCount": 5,
+        "scoredCounts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 1,
+          "6": 1,
+          "7": 2,
+          "8": 1,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 2,
+          "5": 2,
+          "6": 1,
+          "7": 2,
+          "8": 1,
+          "9": 0
+        }
+      },
+      "recent10": {
+        "gameCount": 10,
+        "scoredCounts": {
+          "1": 0,
+          "2": 1,
+          "3": 0,
+          "4": 2,
+          "5": 2,
+          "6": 3,
+          "7": 3,
+          "8": 4,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 2,
+          "2": 2,
+          "3": 2,
+          "4": 2,
+          "5": 3,
+          "6": 3,
+          "7": 3,
+          "8": 4,
+          "9": 1
+        }
+      },
+      "recent20": {
+        "gameCount": 20,
+        "scoredCounts": {
+          "1": 5,
+          "2": 4,
+          "3": 1,
+          "4": 4,
+          "5": 3,
+          "6": 4,
+          "7": 6,
+          "8": 5,
+          "9": 3
+        },
+        "allowedCounts": {
+          "1": 3,
+          "2": 5,
+          "3": 4,
+          "4": 9,
+          "5": 9,
+          "6": 6,
+          "7": 6,
+          "8": 6,
+          "9": 4
+        }
+      }
+    },
+    "home": {
+      "teamName": "統一獅",
+      "recent5": {
+        "gameCount": 5,
+        "scoredCounts": {
+          "1": 1,
+          "2": 0,
+          "3": 1,
+          "4": 2,
+          "5": 3,
+          "6": 2,
+          "7": 3,
+          "8": 1,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 0,
+          "2": 1,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 1,
+          "7": 0,
+          "8": 1,
+          "9": 0
+        }
+      },
+      "recent10": {
+        "gameCount": 10,
+        "scoredCounts": {
+          "1": 2,
+          "2": 2,
+          "3": 2,
+          "4": 4,
+          "5": 4,
+          "6": 4,
+          "7": 4,
+          "8": 2,
+          "9": 0
+        },
+        "allowedCounts": {
+          "1": 0,
+          "2": 2,
+          "3": 2,
+          "4": 1,
+          "5": 1,
+          "6": 2,
+          "7": 2,
+          "8": 3,
+          "9": 1
+        }
+      },
+      "recent20": {
+        "gameCount": 20,
+        "scoredCounts": {
+          "1": 6,
+          "2": 4,
+          "3": 3,
+          "4": 6,
+          "5": 8,
+          "6": 6,
+          "7": 7,
+          "8": 5,
+          "9": 3
+        },
+        "allowedCounts": {
+          "1": 1,
+          "2": 3,
+          "3": 3,
+          "4": 6,
+          "5": 3,
+          "6": 4,
+          "7": 5,
+          "8": 6,
+          "9": 3
+        }
+      }
+    }
+  },
+  "startingLineups": {
+    "away": {
+      "teamName": "台鋼雄鷹",
+      "source": "previous",
+      "sourceDate": "2026-09-05",
+      "opposingPitcher": {
+        "fullName": "獅帝芬"
+      },
+      "batters": [
+        {
+          "order": 1,
+          "id": "0000005340",
+          "name": "王博玄",
+          "position": "一",
+          "positionCode": "1B",
+          "positionLabel": "一",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".250",
+          "recent5Avg": ".300",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 2,
+          "id": "0000006927",
+          "name": "曾子祐",
+          "position": "游",
+          "positionCode": "SS",
+          "positionLabel": "游",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".300",
+          "recent5Avg": ".389",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 3,
+          "id": "0000007239",
+          "name": "魔鷹",
+          "position": "DH",
+          "positionCode": "DH",
+          "positionLabel": "DH",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".100",
+          "recent5Avg": ".294",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 4,
+          "id": "0000003533",
+          "name": "藍寅倫",
+          "position": "左",
+          "positionCode": "LF",
+          "positionLabel": "左",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".100",
+          "recent5Avg": ".167",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 5,
+          "id": "0000003649",
+          "name": "吳念庭",
+          "position": "三",
+          "positionCode": "3B",
+          "positionLabel": "三",
+          "recent3HitGames": 0,
+          "recent3Games": 3,
+          "recent3Avg": ".000",
+          "recent5Avg": ".118",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 6,
+          "id": "0000007833",
+          "name": "永田颯太郎",
+          "position": "二",
+          "positionCode": "2B",
+          "positionLabel": "二",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".167",
+          "recent5Avg": ".273",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 7,
+          "id": "0000000772",
+          "name": "陳文杰",
+          "position": "中",
+          "positionCode": "CF",
+          "positionLabel": "中",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".200",
+          "recent5Avg": ".250",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 8,
+          "id": "0000007064",
+          "name": "陳世嘉",
+          "position": "捕",
+          "positionCode": "C",
+          "positionLabel": "捕",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".286",
+          "recent5Avg": ".222",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 9,
+          "id": "0000006929",
+          "name": "紀慶然",
+          "position": "右",
+          "positionCode": "RF",
+          "positionLabel": "右",
+          "recent3HitGames": 0,
+          "recent3Games": 3,
+          "recent3Avg": ".000",
+          "recent5Avg": ".000",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        }
+      ]
+    },
+    "home": {
+      "teamName": "統一獅",
+      "source": "previous",
+      "sourceDate": "2026-09-05",
+      "opposingPitcher": {
+        "fullName": "黃子鵬"
+      },
+      "batters": [
+        {
+          "order": 1,
+          "id": "0000007037",
+          "name": "張皓崴",
+          "position": "中",
+          "positionCode": "CF",
+          "positionLabel": "中",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".167",
+          "recent5Avg": ".200",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 2,
+          "id": "0000001804",
+          "name": "陳傑憲",
+          "position": "左",
+          "positionCode": "LF",
+          "positionLabel": "左",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".250",
+          "recent5Avg": ".150",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 3,
+          "id": "0000004641",
+          "name": "李丞齡",
+          "position": "右",
+          "positionCode": "RF",
+          "positionLabel": "右",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".364",
+          "recent5Avg": ".364",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 4,
+          "id": "0000006223",
+          "name": "林子豪",
+          "position": "DH",
+          "positionCode": "DH",
+          "positionLabel": "DH",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".250",
+          "recent5Avg": ".250",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 5,
+          "id": "0000002707",
+          "name": "潘傑楷",
+          "position": "三",
+          "positionCode": "3B",
+          "positionLabel": "三",
+          "recent3HitGames": 3,
+          "recent3Games": 3,
+          "recent3Avg": ".385",
+          "recent5Avg": ".381",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 6,
+          "id": "0000006851",
+          "name": "林培緯",
+          "position": "一",
+          "positionCode": "1B",
+          "positionLabel": "一",
+          "recent3HitGames": 2,
+          "recent3Games": 2,
+          "recent3Avg": ".571",
+          "recent5Avg": ".571",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 7,
+          "id": "0000007268",
+          "name": "陳聖平",
+          "position": "游",
+          "positionCode": "SS",
+          "positionLabel": "游",
+          "recent3HitGames": 1,
+          "recent3Games": 3,
+          "recent3Avg": ".111",
+          "recent5Avg": ".250",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 8,
+          "id": "0000002298",
+          "name": "陳重羽",
+          "position": "捕",
+          "positionCode": "C",
+          "positionLabel": "捕",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".273",
+          "recent5Avg": ".250",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        },
+        {
+          "order": 9,
+          "id": "0000007071",
+          "name": "林泓弦",
+          "position": "二",
+          "positionCode": "2B",
+          "positionLabel": "二",
+          "recent3HitGames": 2,
+          "recent3Games": 3,
+          "recent3Avg": ".250",
+          "recent5Avg": ".143",
+          "vsPitcherSeasonAvg": null,
+          "vsPitcherCareerAvg": null
+        }
+      ]
+    },
+    "logicVersion": 3
+  },
+  "situational": {
+    "awayPitcherAwayStarts": {
+      "pitcherName": "黃子鵬",
+      "gameCount": 8,
+      "allowedCounts": {
+        "1": 0,
+        "2": 2,
+        "3": 2,
+        "4": 0,
+        "5": 1,
+        "6": 3,
+        "7": 0,
+        "8": 1,
+        "9": 0
+      }
+    },
+    "homePitcherHomeStarts": {
+      "pitcherName": "獅帝芬",
+      "gameCount": 10,
+      "allowedCounts": {
+        "1": 2,
+        "2": 0,
+        "3": 1,
+        "4": 2,
+        "5": 3,
+        "6": 1,
+        "7": 0,
+        "8": 0,
+        "9": 0
+      }
+    },
+    "awayTeamAwayGames": {
+      "teamName": "台鋼雄鷹",
+      "gameCount": 10,
+      "scoredCounts": {
+        "1": 0,
+        "2": 2,
+        "3": 1,
+        "4": 1,
+        "5": 3,
+        "6": 2,
+        "7": 4,
+        "8": 4,
+        "9": 1
+      }
+    },
+    "homeTeamHomeGames": {
+      "teamName": "統一獅",
+      "gameCount": 10,
+      "scoredCounts": {
+        "1": 2,
+        "2": 1,
+        "3": 2,
+        "4": 4,
+        "5": 4,
+        "6": 3,
+        "7": 2,
+        "8": 2,
+        "9": 1
+      }
+    }
+  },
+  "cacheVersion": 17,
+  "cachedAt": "2026-09-05T15:15:38+00:00",
+  "nextRefreshAt": "2026-09-05T16:15:38+00:00",
+  "fromCache": true,
+  "refreshing": false
+}
