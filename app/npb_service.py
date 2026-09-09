@@ -11,6 +11,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.inning_comparison import build_inning_comparison, build_matchup_situational, strip_panel_internals
+from app.matchup_pick import ExpectedMatchup
 from app.npb_season_batting import get_season_batting_lookup, season_fields_for_batter
 from app.npb_teams import TEAM_BY_CODE, TEAM_BY_ID, list_teams, match_team, team_zh
 from app.npb_vs_pitcher import enrich_batters_vs_pitcher
@@ -36,6 +37,49 @@ PBP_BATTER_NAME_RE = re.compile(
 SCORE_HREF_RE = re.compile(
     r"/scores/(?P<year>\d{4})/(?P<mmdd>\d{4})/(?P<home>[a-z]+)-(?P<away>[a-z]+)-(?P<num>\d+)/"
 )
+_GAME_FINAL_MARKERS = ("試合終了", "コールドゲーム", "ノーゲーム")
+
+
+async def reconcile_schedule_finals(
+    client: NpbClient, schedule: list[dict[str, Any]], *, days_back: int = 7
+) -> None:
+    """Upgrade past games to Final when npb.jp schedule row still says Scheduled."""
+    today = date.today()
+    cutoff = (today - timedelta(days=days_back)).isoformat()
+    candidates = [
+        game
+        for game in schedule
+        if game.get("status") != "Final"
+        and game.get("href")
+        and cutoff <= (game.get("date") or "") <= today.isoformat()
+    ]
+    if not candidates:
+        return
+
+    async def probe(meta: dict[str, Any]) -> None:
+        href = meta.get("href")
+        if not href:
+            return
+        url = href if href.startswith("http") else f"{NPB_BASE}{href}"
+        try:
+            resp = await client._http.get(url)
+            resp.raise_for_status()
+        except httpx.HTTPError:
+            return
+        if not any(marker in resp.text for marker in _GAME_FINAL_MARKERS):
+            return
+        parsed = client._parse_game_page(resp.text, href)
+        if not parsed:
+            return
+        away_runs = sum(parsed.get("awayInnings") or [])
+        home_runs = sum(parsed.get("homeInnings") or [])
+        if away_runs == 0 and home_runs == 0:
+            return
+        meta["status"] = "Final"
+        meta["awayScore"] = away_runs
+        meta["homeScore"] = home_runs
+
+    await asyncio.gather(*[probe(game) for game in candidates])
 
 
 class NpbClient:
@@ -55,6 +99,7 @@ class NpbClient:
 
     async def fetch_schedule(self, months_back: int = 6) -> list[dict[str, Any]]:
         if self._schedule_cache is not None:
+            await reconcile_schedule_finals(self, self._schedule_cache)
             return self._schedule_cache
 
         today = date.today()
@@ -81,6 +126,7 @@ class NpbClient:
             games.extend(self._parse_schedule_page(resp.text, year))
 
         games.sort(key=lambda g: (g.get("date", ""), g.get("startTime", ""), g.get("href") or ""))
+        await reconcile_schedule_finals(self, games)
         self._schedule_cache = games
         return games
 
@@ -604,7 +650,12 @@ async def fetch_npb_teams() -> list[dict[str, Any]]:
     return list_teams()
 
 
-async def fetch_next_matchup(client: NpbClient, focus_team_id: int) -> dict[str, Any] | None:
+async def fetch_next_matchup(
+    client: NpbClient,
+    focus_team_id: int,
+    *,
+    expected: ExpectedMatchup | None = None,
+) -> dict[str, Any] | None:
     schedule = await client.fetch_schedule()
     today = datetime.now(JST).date().isoformat()
 
@@ -626,6 +677,11 @@ async def fetch_next_matchup(client: NpbClient, focus_team_id: int) -> dict[str,
 
     upcoming.sort(key=sort_key)
     game = upcoming[0]
+    if expected:
+        for candidate in upcoming:
+            if expected.matches_schedule_row(candidate):
+                game = candidate
+                break
     focus_is_home = game["homeTeamId"] == focus_team_id
 
     def side_info(team_id: int, probable: str | None) -> dict[str, Any]:
@@ -1147,6 +1203,8 @@ def npb_lineups_need_rebuild(
             source = (side_data.get("source") or "").strip().lower()
             status = (matchup_status or "").strip().lower()
             if source_date and source_date != matchup_date and status not in {"final"}:
+                if source == "previous":
+                    continue
                 return True
             if source != "confirmed" and source_date == matchup_date and status in {"scheduled", "live", "in progress"}:
                 return True
@@ -1420,47 +1478,63 @@ async def rebuild_pitcher_dependent_fields(
     away["pitcherAnalysis"] = away_pa
     home["pitcherAnalysis"] = home_pa
     data = dict(data)
-    data["away"] = strip_panel_internals(away)
-    data["home"] = strip_panel_internals(home)
+    data["away"] = away
+    data["home"] = home
     if starting_lineups is not None:
         data["startingLineups"] = starting_lineups
-    data["situational"] = build_matchup_situational(data["away"], data["home"])
+    new_situational = build_matchup_situational(away, home)
+    from app.inning_comparison import merge_team_situational_from_cache
+
+    data["situational"] = merge_team_situational_from_cache(
+        new_situational, data.get("situational")
+    )
     return data
 
 
-async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str, Any]:
+async def apply_playsport_probable_pitchers(matchup: dict[str, Any]) -> None:
+    """Fill missing NPB probable pitchers from playsport override / scrape."""
+    needs_away = not (matchup.get("away") or {}).get("probablePitcher")
+    needs_home = not (matchup.get("home") or {}).get("probablePitcher")
+    if not needs_away and not needs_home:
+        return
+    try:
+        import httpx as _httpx
+        from app.playsport_starters import fetch_playsport_starters
+
+        async with _httpx.AsyncClient(timeout=15) as _http:
+            ps_games = await fetch_playsport_starters(_http)
+        away_name = (matchup.get("away") or {}).get("teamName") or ""
+        home_name = (matchup.get("home") or {}).get("teamName") or ""
+        for pg in ps_games:
+            if pg.get("league") != "npb":
+                continue
+            if (
+                pg.get("awayTeam", "") in away_name or away_name in pg.get("awayTeam", "")
+            ) and (
+                pg.get("homeTeam", "") in home_name or home_name in pg.get("homeTeam", "")
+            ):
+                if needs_away and pg.get("awayStarter"):
+                    matchup["away"]["probablePitcher"] = {"fullName": pg["awayStarter"]}
+                if needs_home and pg.get("homeStarter"):
+                    matchup["home"]["probablePitcher"] = {"fullName": pg["homeStarter"]}
+                break
+    except Exception:
+        pass
+
+
+async def analyze_matchup(
+    focus_team_id: int,
+    game_count: int = 10,
+    *,
+    expected: ExpectedMatchup | None = None,
+) -> dict[str, Any]:
     client = NpbClient()
     try:
-        matchup = await fetch_next_matchup(client, focus_team_id)
+        matchup = await fetch_next_matchup(client, focus_team_id, expected=expected)
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
-        # playsport fallback for probable pitchers
-        needs_away = not matchup["away"].get("probablePitcher")
-        needs_home = not matchup["home"].get("probablePitcher")
-        if needs_away or needs_home:
-            try:
-                import httpx as _httpx
-                from app.playsport_starters import fetch_playsport_starters
-                async with _httpx.AsyncClient(timeout=15) as _http:
-                    ps_games = await fetch_playsport_starters(_http)
-                away_name = matchup["away"].get("teamNameZh", "") or ""
-                home_name = matchup["home"].get("teamNameZh", "") or ""
-                for pg in ps_games:
-                    if pg.get("league") != "npb":
-                        continue
-                    if (
-                        pg.get("awayTeam", "") in away_name or away_name in pg.get("awayTeam", "")
-                    ) and (
-                        pg.get("homeTeam", "") in home_name or home_name in pg.get("homeTeam", "")
-                    ):
-                        if needs_away and pg.get("awayStarter"):
-                            matchup["away"]["probablePitcher"] = {"fullName": pg["awayStarter"]}
-                        if needs_home and pg.get("homeStarter"):
-                            matchup["home"]["probablePitcher"] = {"fullName": pg["homeStarter"]}
-                        break
-            except Exception:
-                pass
+        await apply_playsport_probable_pitchers(matchup)
 
         away_id = matchup["away"]["teamId"]
         home_id = matchup["home"]["teamId"]
@@ -1472,8 +1546,6 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
             fetch_matchup_starting_lineups(client, matchup),
         )
         situational = build_matchup_situational(away_panel, home_panel)
-        away_panel = strip_panel_internals(away_panel)
-        home_panel = strip_panel_internals(home_panel)
     finally:
         await client.close()
 

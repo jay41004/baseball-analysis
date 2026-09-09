@@ -174,6 +174,34 @@ def build_matchup_situational(
     }
 
 
+def refresh_situational_from_panels(data: dict[str, Any]) -> dict[str, Any]:
+    """Recompute situational blocks when location pools are still on the panels."""
+    away = data.get("away") or {}
+    home = data.get("home") or {}
+    if not (away.get("games") or home.get("games")):
+        return data
+    if not (away.get("_scoredPool") or home.get("_scoredPool")):
+        return data
+    out = dict(data)
+    out["situational"] = build_matchup_situational(away, home)
+    return out
+
+
+def merge_team_situational_from_cache(
+    new_situational: dict[str, Any], old_situational: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Keep full home/away pools when panels no longer carry _scoredPool."""
+    if not old_situational:
+        return new_situational
+    merged = dict(new_situational)
+    for key in ("awayTeamAwayGames", "homeTeamHomeGames"):
+        old_block = old_situational.get(key) or {}
+        new_block = merged.get(key) or {}
+        if (old_block.get("gameCount") or 0) > (new_block.get("gameCount") or 0):
+            merged[key] = old_block
+    return merged
+
+
 def strip_panel_internals(panel: dict[str, Any]) -> dict[str, Any]:
     cleaned = {key: value for key, value in panel.items() if key != "_scoredPool"}
     analysis = cleaned.get("pitcherAnalysis")

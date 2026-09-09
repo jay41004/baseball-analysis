@@ -30,6 +30,7 @@ from app.cpbl_service import (
     fetch_matchup_starting_lineups,
     fetch_next_matchup,
 )
+from app.matchup_pick import ExpectedMatchup
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,9 @@ async def refresh_matchup_lineups(team_id: int, games: int = DEFAULT_GAMES) -> N
     await store_matchup(team_id, games, data)
 
 
-async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> None:
+async def refresh_matchup_header(
+    team_id: int, games: int = DEFAULT_GAMES, *, expected: ExpectedMatchup | None = None
+) -> None:
     """Patch next-game header (+ lineups/pitcher blocks). Seed Pages only if empty."""
     from app.cloud_lite import is_cloud_lite
     from app.loading_response import loading_matchup_payload
@@ -123,7 +126,7 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
     matchup = None
     client = CpblClient()
     try:
-        matchup = await fetch_next_matchup(client, team_id)
+        matchup = await fetch_next_matchup(client, team_id, expected=expected)
     except Exception:
         logger.exception("CPBL header fetch failed for team %s (keeping Pages/cache)", team_id)
     finally:
@@ -133,10 +136,12 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
 
     if cached:
         data = copy.deepcopy(cached["data"])
+        prev_snapshot = copy.deepcopy(cached["data"])
     else:
         data = loading_matchup_payload(team_id, cache_version=CACHE_VERSION)
         data.pop("loading", None)
         data.pop("refreshing", None)
+        prev_snapshot = None
 
     old_away = int((data.get("away") or {}).get("teamId") or 0)
     old_home = int((data.get("home") or {}).get("teamId") or 0)
@@ -168,8 +173,14 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         "stadium": matchup.get("stadium"),
     }
 
+    from app.pitcher_peer_sync import (
+        merge_probable_pitchers_from_cache,
+        patch_probable_pitcher_header,
+        pitcher_name,
+    )
+
     def _name(panel: dict[str, Any] | None) -> str:
-        return ((panel or {}).get("probablePitcher") or {}).get("fullName") or ""
+        return pitcher_name(panel)
 
     if old_away and old_home and {old_away, old_home} == {new_away, new_home}:
         if old_away == new_home and old_home == new_away:
@@ -180,18 +191,7 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
             panel["teamId"] = src["teamId"]
             panel["teamName"] = src.get("teamName") or panel.get("teamName")
             new_pitcher = src.get("probablePitcher")
-            new_name = (new_pitcher or {}).get("fullName") or ""
-            old_name = _name(panel)
-            if game_changed:
-                # Always bind this gameSno's starters (clear stale next-game names).
-                panel["probablePitcher"] = new_pitcher
-                if old_name != new_name:
-                    panel.pop("pitcherAnalysis", None)
-            elif new_pitcher and new_name:
-                # Only overwrite pitcher when live has a name — never clear a known starter.
-                panel["probablePitcher"] = new_pitcher
-                if old_name and new_name and old_name != new_name:
-                    panel.pop("pitcherAnalysis", None)
+            patch_probable_pitcher_header(panel, new_pitcher, game_changed=game_changed)
             data[side] = panel
     else:
         empty_summary = {
@@ -217,13 +217,26 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
         data.pop("aTable", None)
         data.pop("situational", None)
 
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+    from app.cpbl_cache import (
+        _count_final_starts_on_schedule,
+        _load_schedule_games_for_upgrade,
+    )
+    from app.pitcher_rows import pitcher_analysis_needs_rebuild
+
+    schedule = _load_schedule_games_for_upgrade()
+    expected_by_side: dict[str, int] = {}
+    for side in ("away", "home"):
+        panel = data.get(side) or {}
+        starter = _name(panel)
+        team_id = int(panel.get("teamId") or 0)
+        if starter and team_id and schedule:
+            expected_by_side[side] = _count_final_starts_on_schedule(
+                schedule, team_id, starter
+            )
 
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
-        _name(data.get(side))
-        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
-        for side in ("away", "home")
+    needs_analysis = pitcher_analysis_needs_rebuild(
+        data, game_count=games, expected_starts_by_side=expected_by_side
     )
 
     # Always refresh lineups on header update (game-day confirmed card).
@@ -268,7 +281,20 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
             "CPBL lineup/pitcher refresh failed for team %s", team_id
         )
 
+    if prev_snapshot:
+        merge_probable_pitchers_from_cache(
+            data, prev_snapshot, league="cpbl", fill_only=True
+        )
+
+    from app.inning_comparison import refresh_situational_from_panels
+
+    data = refresh_situational_from_panels(data)
     await store_matchup(team_id, games, data)
+    from app.pitcher_peer_sync import mirror_pitchers_to_peer
+
+    await mirror_pitchers_to_peer(
+        data, games, team_id, get_matchup=get_matchup, store_matchup=store_matchup
+    )
     logger.info(
         "Refreshed CPBL matchup header for team %s → %s (cloudLite=%s)",
         team_id,
@@ -277,7 +303,9 @@ async def refresh_matchup_header(team_id: int, games: int = DEFAULT_GAMES) -> No
     )
 
 
-async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
+async def refresh_matchup(
+    team_id: int, games: int = DEFAULT_GAMES, *, expected: ExpectedMatchup | None = None
+) -> None:
     key = f"cpbl:matchup:v{CACHE_VERSION}:{team_id}:{games}"
     if key in _refreshing_keys:
         return
@@ -287,16 +315,37 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
         from app.cloud_lite import is_cloud_lite
 
         if is_cloud_lite():
-            await refresh_matchup_header(team_id, games)
+            await refresh_matchup_header(team_id, games, expected=expected)
             return
 
-        from app.cpbl_service import invalidate_shared_schedule_cache
+        from app.cpbl_service import (
+            invalidate_shared_schedule_cache,
+            rebuild_pitcher_dependent_fields,
+        )
+        from app.cpbl_cache import (
+            _count_final_starts_on_schedule,
+            _load_schedule_games_for_upgrade,
+        )
+        from app.pitcher_rows import (
+            cached_pitcher_analysis_complete,
+            pitcher_analysis_needs_rebuild,
+        )
 
         # Clear in-memory schedule only so status repair / pitchers re-apply.
         # Do not wipe the disk schedule file on every team refresh.
         invalidate_shared_schedule_cache(wipe_disk=False)
         previous = get_matchup(team_id, games)
-        data = await analyze_matchup(team_id, games)
+        data = await analyze_matchup(team_id, games, expected=expected)
+        from app.pitcher_peer_sync import merge_probable_pitchers_from_cache
+
+        prev = (previous.get("data") or {}) if previous else {}
+        pitcher_merged = (
+            merge_probable_pitchers_from_cache(
+                data, prev, league="cpbl", fill_only=False
+            )
+            if prev
+            else False
+        )
         # Official schedule sometimes returns blank starters briefly — keep known names
         # only when this is the same gameSno (consecutive days share opponent clubs).
         if previous:
@@ -314,8 +363,20 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
                     old_name = ((old_panel.get("probablePitcher") or {}).get("fullName") or "").strip()
                     if not new_name and old_name:
                         new_panel["probablePitcher"] = old_panel.get("probablePitcher")
-                        if old_panel.get("pitcherAnalysis"):
-                            new_panel["pitcherAnalysis"] = old_panel.get("pitcherAnalysis")
+                        old_analysis = old_panel.get("pitcherAnalysis")
+                        if old_analysis:
+                            old_games = (old_analysis or {}).get("games") or []
+                            side_team_id = int(new_panel.get("teamId") or 0)
+                            schedule = _load_schedule_games_for_upgrade()
+                            expected = (
+                                _count_final_starts_on_schedule(schedule, side_team_id, old_name)
+                                if schedule and side_team_id
+                                else 0
+                            )
+                            if cached_pitcher_analysis_complete(
+                                old_games, game_count=games, expected_starts=expected
+                            ):
+                                new_panel["pitcherAnalysis"] = old_analysis
                         data[side] = new_panel
                     elif (
                         new_name
@@ -324,8 +385,34 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
                         and not (new_panel.get("pitcherAnalysis") or {}).get("games")
                         and (old_panel.get("pitcherAnalysis") or {}).get("games")
                     ):
-                        new_panel["pitcherAnalysis"] = old_panel.get("pitcherAnalysis")
-                        data[side] = new_panel
+                        old_games = (old_panel.get("pitcherAnalysis") or {}).get("games") or []
+                        side_team_id = int(new_panel.get("teamId") or 0)
+                        schedule = _load_schedule_games_for_upgrade()
+                        expected = (
+                            _count_final_starts_on_schedule(schedule, side_team_id, new_name)
+                            if schedule and side_team_id
+                            else 0
+                        )
+                        if cached_pitcher_analysis_complete(
+                            old_games, game_count=games, expected_starts=expected
+                        ):
+                            new_panel["pitcherAnalysis"] = old_panel.get("pitcherAnalysis")
+                            data[side] = new_panel
+
+        schedule = _load_schedule_games_for_upgrade()
+        expected_by_side: dict[str, int] = {}
+        for side in ("away", "home"):
+            panel = data.get(side) or {}
+            starter = ((panel.get("probablePitcher") or {}).get("fullName") or "").strip()
+            side_team_id = int(panel.get("teamId") or 0)
+            if starter and side_team_id and schedule:
+                expected_by_side[side] = _count_final_starts_on_schedule(
+                    schedule, side_team_id, starter
+                )
+        if pitcher_merged or pitcher_analysis_needs_rebuild(
+            data, game_count=games, expected_starts_by_side=expected_by_side
+        ):
+            data = await rebuild_pitcher_dependent_fields(data, game_count=games)
         client = CpblClient()
         try:
             matchup = await fetch_next_matchup(client, team_id)
@@ -336,6 +423,11 @@ async def refresh_matchup(team_id: int, games: int = DEFAULT_GAMES) -> None:
         finally:
             await client.close()
         await store_matchup(team_id, games, data)
+        from app.pitcher_peer_sync import mirror_pitchers_to_peer
+
+        await mirror_pitchers_to_peer(
+            data, games, team_id, get_matchup=get_matchup, store_matchup=store_matchup
+        )
         if a_table := data.get("aTable"):
             await store_a_table(team_id, a_table)
         logger.info("Refreshed CPBL matchup cache for team %s (%s games)", team_id, games)
@@ -354,8 +446,28 @@ def _teams_needing_refresh(teams: list[dict], games: int) -> list[dict]:
             continue
         from app.cpbl_cache import cache_needs_upgrade
 
-        if cache_needs_upgrade(entry):
+        if cache_needs_upgrade(entry, games=games):
             stale.append(team)
+    return stale
+
+
+async def _teams_needing_refresh_async(teams: list[dict], games: int) -> list[dict]:
+    from app.panel_freshness import cpbl_team_panels_stale
+
+    stale = _teams_needing_refresh(teams, games)
+    stale_ids = {int(t["id"]) for t in stale}
+    for team in teams:
+        tid = int(team["id"])
+        if tid in stale_ids:
+            continue
+        entry = get_matchup(tid, games)
+        if not entry:
+            continue
+        try:
+            if await cpbl_team_panels_stale(tid, entry.get("data") or {}):
+                stale.append(team)
+        except Exception:
+            logger.exception("CPBL panel stale check failed for team %s", tid)
     return stale
 
 
@@ -365,7 +477,7 @@ async def refresh_all_matchups(games: int = DEFAULT_GAMES) -> None:
         _warming_all = True
         try:
             teams = await fetch_cpbl_teams()
-            targets = _teams_needing_refresh(teams, games)
+            targets = await _teams_needing_refresh_async(teams, games)
             if not targets:
                 logger.info("CPBL cache already warm for all %s teams", len(teams))
             else:

@@ -14,7 +14,7 @@ from app.npb_display import localize_matchup_payload
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 21
+CACHE_VERSION = 22
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "npb_cache.json"
@@ -91,6 +91,9 @@ def cached_team_count(games: int = DEFAULT_GAMES) -> int:
 
 
 async def store_matchup(team_id: int, games: int, data: dict[str, Any]) -> dict[str, Any]:
+    from app.matchup_integrity import sanitize_matchup_for_store
+
+    data = sanitize_matchup_for_store(data, "npb")
     entry = {"data": data, "updatedAt": _now_iso()}
     async with _lock:
         _store[_matchup_key(team_id, games)] = entry
@@ -127,6 +130,11 @@ def load_from_disk() -> None:
         _store.update(current)
         if len(current) != len(raw):
             save_to_disk()
+        from app.matchup_integrity import repair_league_store
+
+        repaired = repair_league_store(_store, league="npb", key_prefix=prefix)
+        if repaired:
+            save_to_disk()
     except (json.JSONDecodeError, OSError):
         pass
 
@@ -154,6 +162,9 @@ def wrap_matchup_response(
     next_refresh = _parse_time(updated_at) + CACHE_TTL
     data = copy.deepcopy(entry["data"])
     localize_matchup_payload(data)
+    from app.matchup_integrity import guard_matchup_for_api
+
+    data = guard_matchup_for_api(data, "npb")
     return {
         **data,
         "cacheVersion": CACHE_VERSION,

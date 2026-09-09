@@ -1,6 +1,6 @@
 /**
  * Today / tomorrow two-column game picker (PlaySport-style).
- * Click a game → set hidden team select → load analysis below.
+ * Click a game → remember exact matchup → load analysis below.
  */
 window.GamePicker = (function () {
   const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
@@ -49,7 +49,7 @@ window.GamePicker = (function () {
     const home = shortTeamName(row.homeName);
     const time = formatTimeDisplay(row.timeTaiwan);
     return `
-      <button type="button" class="game-pick-item${active}" data-team-id="${row.awayTeamId}" data-game-key="${key}">
+      <button type="button" class="game-pick-item${active}" data-game-key="${key}" data-date="${row.date}" data-away-id="${row.awayTeamId}" data-home-id="${row.homeTeamId}" data-game-pk="${row.gamePk || ""}">
         <span class="game-pick-time">${time || "—"}</span>
         <span class="game-pick-teams">${away} <span class="game-pick-vs">VS</span> ${home}</span>
       </button>
@@ -68,8 +68,7 @@ window.GamePicker = (function () {
     `;
   }
 
-  function setActive(root, teamId, games) {
-    const selectedKey = findSelectedKey(games, teamId);
+  function setActiveByKey(root, selectedKey) {
     root.querySelectorAll(".game-pick-item").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.gameKey === selectedKey);
     });
@@ -82,14 +81,48 @@ window.GamePicker = (function () {
     if (label) label.classList.remove("visually-hidden");
   }
 
-  function bindClicks(root, teamSelect, onSelect, allGames) {
+  function rowFromButton(btn) {
+    const pk = btn.dataset.gamePk ? Number(btn.dataset.gamePk) : null;
+    return {
+      date: btn.dataset.date,
+      awayTeamId: Number(btn.dataset.awayId),
+      homeTeamId: Number(btn.dataset.homeId),
+      gamePk: pk && Number.isFinite(pk) ? pk : null,
+    };
+  }
+
+  function resolvePickFromSlate(pick, allGames, league) {
+    if (!pick || !allGames.length) return null;
+    if (pick.gamePk) {
+      const byPk = allGames.find((r) => Number(r.gamePk) === Number(pick.gamePk));
+      if (byPk) return byPk;
+    }
+    const pd = String(pick.date || "").slice(0, 10);
+    const byTeams = allGames.find(
+      (r) =>
+        String(r.date).slice(0, 10) === pd &&
+        Number(r.awayTeamId) === Number(pick.awayTeamId) &&
+        Number(r.homeTeamId) === Number(pick.homeTeamId)
+    );
+    if (byTeams) return byTeams;
+    ApiUtils.matchupPick.clear(league);
+    return null;
+  }
+
+  function bindClicks(root, teamSelect, onSelect, allGames, league) {
     root.querySelectorAll(".game-pick-item").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const teamId = btn.dataset.teamId;
-        if (!teamId || teamSelect.value === teamId) return;
-        teamSelect.value = teamId;
-        setActive(root, teamId, allGames);
-        if (onSelect) onSelect(teamId);
+        const row = rowFromButton(btn);
+        if (!row.date || !row.awayTeamId || !row.homeTeamId) return;
+        ApiUtils.matchupPick.save(league, row);
+        const preferred = [String(row.awayTeamId), String(row.homeTeamId)].includes(
+          teamSelect.value
+        )
+          ? teamSelect.value
+          : String(row.awayTeamId);
+        teamSelect.value = preferred;
+        setActiveByKey(root, btn.dataset.gameKey);
+        if (onSelect) onSelect(preferred, row);
       });
     });
   }
@@ -121,7 +154,30 @@ window.GamePicker = (function () {
       const todayGames = data.todayGames || leagueData.today || [];
       const tomorrowGames = data.tomorrowGames || leagueData.tomorrow || [];
       const allGames = [...todayGames, ...tomorrowGames];
-      const selectedKey = findSelectedKey(allGames, teamSelect.value);
+      const savedPick = ApiUtils.matchupPick.load(league);
+      let activePick = resolvePickFromSlate(savedPick, allGames, league);
+      if (activePick && activePick !== savedPick) {
+        ApiUtils.matchupPick.save(league, activePick);
+      }
+      if (!activePick) {
+        const teamId = teamSelect.value;
+        const row =
+          todayGames.find((r) => isSelected(r, teamId)) ||
+          tomorrowGames.find((r) => isSelected(r, teamId)) ||
+          todayGames[0] ||
+          tomorrowGames[0];
+        if (row) {
+          activePick = row;
+          ApiUtils.matchupPick.save(league, activePick);
+          const preferred = [String(row.awayTeamId), String(row.homeTeamId)].includes(teamId)
+            ? teamId
+            : String(row.homeTeamId);
+          teamSelect.value = preferred;
+        }
+      }
+      const selectedKey = activePick
+        ? gameKey(activePick)
+        : findSelectedKey(allGames, teamSelect.value);
 
       el.innerHTML = `
         <div class="game-picker">
@@ -130,12 +186,14 @@ window.GamePicker = (function () {
         </div>
       `;
 
-      bindClicks(el, teamSelect, onSelect, allGames);
+      bindClicks(el, teamSelect, onSelect, allGames, league);
+      return Boolean(activePick);
     } catch (err) {
       el.innerHTML = `<p class="game-picker-note">賽程暫時無法載入，請用下方選單選隊。</p>`;
       showTeamSelectFallback(teamSelect);
+      return false;
     }
   }
 
-  return { mount, setActive };
+  return { mount, setActiveByKey, gameKey };
 })();

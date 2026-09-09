@@ -26,6 +26,24 @@ def _day_bucket(game_date: str, today: str, tomorrow: str) -> str | None:
     return None
 
 
+def _ymd_minus(iso: str, days: int) -> str:
+    return (date.fromisoformat(iso) - timedelta(days=days)).isoformat()
+
+
+def _mlb_day_bucket(official: str, today: str, tomorrow: str) -> str | None:
+    """台灣欄位日期 −1 天 = 美國 officialDate。
+
+    例：台灣今天 9/7、明天 9/8 → 今天欄美國 9/6、明天欄美國 9/7。
+    """
+    if not official:
+        return None
+    if official == _ymd_minus(today, 1):
+        return "today"
+    if official == _ymd_minus(tomorrow, 1):
+        return "tomorrow"
+    return None
+
+
 def _format_time_taiwan(iso: str | None) -> str:
     if not iso:
         return ""
@@ -90,7 +108,13 @@ def _bucket_games(games: list[dict[str, Any]], today: str, tomorrow: str) -> dic
         elif bucket == "tomorrow":
             out["tomorrow"].append(game)
     for key in ("today", "tomorrow"):
-        out[key].sort(key=lambda g: (g.get("timeTaiwan") or "99:99", g.get("awayName") or ""))
+        out[key].sort(
+            key=lambda g: (
+                g.get("date") or "",
+                g.get("timeTaiwan") or "99:99",
+                g.get("awayName") or "",
+            )
+        )
     return out
 
 
@@ -175,11 +199,12 @@ async def fetch_cpbl_slate() -> dict[str, list[dict[str, Any]]]:
 
 async def fetch_mlb_slate() -> dict[str, list[dict[str, Any]]]:
     from app.mlb_display import format_matchup_timing
-    from app.mlb_service import MLB_BASE, UPCOMING_GAME_STATES, mlb_schedule_start
+    from app.mlb_service import MLB_BASE, UPCOMING_GAME_STATES
     from app.team_names import team_name_zh
 
     today, tomorrow = _today_tomorrow()
-    start = mlb_schedule_start()
+    # Taiwan today/tomorrow: bucket by Taiwan wall-clock date of first pitch.
+    start = date.fromisoformat(today) - timedelta(days=2)
     end = date.fromisoformat(tomorrow) + timedelta(days=1)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -208,21 +233,23 @@ async def fetch_mlb_slate() -> dict[str, list[dict[str, Any]]]:
             home = game["teams"]["home"]["team"]
             game_date_iso = str(game.get("gameDate") or "")
             home_id = int(home["id"])
+            official = str(game.get("officialDate") or day.get("date") or "")[:10]
             timing = format_matchup_timing(
                 game_date_iso,
                 venue_raw=str((game.get("venue") or {}).get("name") or ""),
                 home_team_id=home_id,
-                official_date=str(game.get("officialDate") or day.get("date") or "")[:10] or None,
+                official_date=official or None,
             )
             tw_date = timing["date"]
-            bucket = _day_bucket(tw_date, today, tomorrow)
+            # 台灣今天欄→美國昨天；台灣明天欄→美國今天（例：台 9/7、9/8 → 美 9/6、9/7）。
+            bucket = _mlb_day_bucket(official, today, tomorrow)
             if not bucket:
                 continue
             away_p = game["teams"]["away"].get("probablePitcher") or {}
             home_p = game["teams"]["home"].get("probablePitcher") or {}
             entry = _slate_entry(
                 league="mlb",
-                game_date=tw_date,
+                game_date=official,
                 away_team_id=int(away["id"]),
                 home_team_id=home_id,
                 away_name=team_name_zh(team_id=away["id"], english_name=away.get("name")),
@@ -234,9 +261,61 @@ async def fetch_mlb_slate() -> dict[str, list[dict[str, Any]]]:
                 time_taiwan=timing["timeTaiwan"],
                 time_local=timing["timeLocal"],
             )
+            entry["taiwanDate"] = tw_date
+            entry["officialDate"] = official
+            entry["gamePk"] = game.get("gamePk")
             entry["_bucket"] = bucket
             rows.append(entry)
     return _bucket_games(rows, today, tomorrow)
+
+
+async def resolve_mlb_slate_pick(team_id: int) -> dict[str, Any] | None:
+    """Today's slate first, then tomorrow — US officialDate row for this team."""
+    bucket = await fetch_mlb_slate()
+    for key in ("today", "tomorrow"):
+        for game in bucket.get(key) or []:
+            if team_id in {int(game["awayTeamId"]), int(game["homeTeamId"])}:
+                return game
+    return None
+
+
+def expected_from_slate_row(row: dict[str, Any]) -> "ExpectedMatchup":
+    from app.matchup_pick import ExpectedMatchup
+
+    return ExpectedMatchup(
+        date=str(row.get("date") or "")[:10] or None,
+        away_id=int(row["awayTeamId"]),
+        home_id=int(row["homeTeamId"]),
+        game_pk=int(row["gamePk"]) if row.get("gamePk") else None,
+    )
+
+
+async def align_expected_with_slate(
+    team_id: int, expected: "ExpectedMatchup | None"
+) -> "ExpectedMatchup | None":
+    """Match by gamePk or team pair on today's/tomorrow slate (US officialDate)."""
+    from app.matchup_pick import ExpectedMatchup
+
+    bucket = await fetch_mlb_slate()
+    rows = (bucket.get("today") or []) + (bucket.get("tomorrow") or [])
+    if not rows:
+        return expected
+
+    if expected and expected.game_pk:
+        for row in rows:
+            if int(row.get("gamePk") or 0) == int(expected.game_pk):
+                return expected_from_slate_row(row)
+
+    if expected and expected.away_id and expected.home_id:
+        for row in rows:
+            if {int(row["awayTeamId"]), int(row["homeTeamId"])} == {
+                int(expected.away_id),
+                int(expected.home_id),
+            }:
+                return expected_from_slate_row(row)
+
+    row = await resolve_mlb_slate_pick(team_id)
+    return expected_from_slate_row(row) if row else expected
 
 
 _SLATE_FETCHERS = {

@@ -14,7 +14,8 @@ from app.inning_comparison import (
     strip_panel_internals,
 )
 from app.pitcher_rows import mlb_feed_is_final, pitch_count_from_stat
-from app.mlb_display import format_matchup_timing
+from app.mlb_display import format_matchup_timing, mlb_game_row_date
+from app.matchup_pick import ExpectedMatchup
 from app.team_names import team_name_zh
 
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
@@ -82,7 +83,10 @@ async def fetch_recent_final_games(
         if g.get("status", {}).get("abstractGameState") == "Final"
         and g.get("status", {}).get("detailedState") != "Postponed"
     ]
-    games.sort(key=lambda g: g.get("officialDate", ""), reverse=True)
+    games.sort(
+        key=lambda g: g.get("gameDate") or g.get("officialDate") or "",
+        reverse=True,
+    )
 
     seen: set[int] = set()
     unique: list[dict[str, Any]] = []
@@ -245,14 +249,143 @@ def _parse_batters_from_team_box(team_data: dict[str, Any]) -> list[dict[str, An
 LINEUP_LOGIC_VERSION = 3
 
 
-def lineups_need_rebuild(lineups: dict[str, Any] | None) -> bool:
+def lineups_trusted_for_matchup(
+    lineups: dict[str, Any] | None,
+    *,
+    matchup_date: str | None = None,
+    matchup_status: str | None = None,
+) -> bool:
+    """False when lineups are from another game (e.g. previous-start fallback)."""
+    if not lineups:
+        return False
+    if lineups.get("logicVersion") != LINEUP_LOGIC_VERSION:
+        return False
+    mdate = (matchup_date or "")[:10]
+    status = (matchup_status or "").strip().lower()
+    for side in ("away", "home"):
+        side_data = lineups.get(side) or {}
+        if len(side_data.get("batters") or []) < 7:
+            return False
+        source = (side_data.get("source") or "").strip().lower()
+        source_date = (side_data.get("sourceDate") or "")[:10]
+        if source == "previous" and status in {
+            "scheduled",
+            "preview",
+            "pre-game",
+            "pregame",
+            "warmup",
+            "",
+        }:
+            continue
+        if source == "previous":
+            return False
+        if mdate and source_date and source_date != mdate and status not in {"final"}:
+            return False
+        if source != "confirmed" and status in {
+            "scheduled",
+            "preview",
+            "pre-game",
+            "warmup",
+        }:
+            return False
+    return True
+
+
+def lineups_need_rebuild(
+    lineups: dict[str, Any] | None,
+    *,
+    matchup_date: str | None = None,
+    matchup_status: str | None = None,
+) -> bool:
     if not lineups:
         return True
     if lineups.get("logicVersion") != LINEUP_LOGIC_VERSION:
         return True
-    away = len((lineups.get("away") or {}).get("batters") or [])
-    home = len((lineups.get("home") or {}).get("batters") or [])
-    return away == 0 and home == 0
+    if not lineups_trusted_for_matchup(
+        lineups, matchup_date=matchup_date, matchup_status=matchup_status
+    ):
+        return True
+    for side in ("away", "home"):
+        side_data = lineups.get(side) or {}
+        count = len(side_data.get("batters") or [])
+        if count == 0:
+            return True
+        if matchup_date:
+            source_date = (side_data.get("sourceDate") or "")[:10]
+            source = (side_data.get("source") or "").strip().lower()
+            status = (matchup_status or "").strip().lower()
+            if source_date and source_date != matchup_date and status not in {"final"}:
+                if source == "previous":
+                    continue
+                return True
+            if (
+                source != "confirmed"
+                and source_date == matchup_date
+                and status in {"scheduled", "live", "in progress", "preview", "warmup"}
+            ):
+                return True
+    return False
+
+
+def matchup_header_needs_immediate_refresh(cached: dict | None) -> bool:
+    """Today's or live games must not keep a stale Scheduled header."""
+    if not cached:
+        return False
+    matchup = (cached.get("data") or {}).get("matchup") or {}
+    status = (matchup.get("status") or "").strip().lower()
+    if any(
+        token in status
+        for token in ("live", "in progress", "warmup", "challenge", "delay", "review")
+    ):
+        return True
+    game_date = (matchup.get("date") or "")[:10]
+    today = date.today().isoformat()
+    if game_date and game_date <= today and status in {
+        "scheduled",
+        "preview",
+        "pre-game",
+        "",
+    }:
+        return True
+    return False
+
+
+async def mlb_cache_game_pk_mismatch(
+    client: httpx.AsyncClient,
+    team_id: int,
+    cached: dict | None,
+    *,
+    expected: ExpectedMatchup | None = None,
+) -> bool:
+    """True when disk/memory cache points at a different game than MLB schedule."""
+    if not cached:
+        return False
+    cached_pk = ((cached.get("data") or {}).get("matchup") or {}).get("gamePk")
+    live = await fetch_next_matchup(client, team_id, expected=expected)
+    return bool(live and cached_pk and live.get("gamePk") != cached_pk)
+
+
+def matchup_dict_from_cached_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild fetch_next_matchup-shaped dict from stored matchup payload."""
+    matchup = data.get("matchup") or {}
+    away = data.get("away") or {}
+    home = data.get("home") or {}
+    return {
+        "date": matchup.get("date"),
+        "gameDate": matchup.get("gameDate"),
+        "gamePk": matchup.get("gamePk"),
+        "status": matchup.get("status"),
+        "away": {
+            "teamId": away.get("teamId"),
+            "teamName": away.get("teamName"),
+            "probablePitcher": away.get("probablePitcher"),
+        },
+        "home": {
+            "teamId": home.get("teamId"),
+            "teamName": home.get("teamName"),
+            "probablePitcher": home.get("probablePitcher"),
+        },
+    }
 
 
 
@@ -504,6 +637,20 @@ async def fetch_matchup_starting_lineups(
     feed = await fetch_game_feed(client, game_pk)
     box_teams = feed.get("liveData", {}).get("boxscore", {}).get("teams", {})
 
+    status = (matchup.get("status") or "").strip().lower()
+    allow_previous_fallback = status in {
+        "in progress",
+        "live",
+        "final",
+        "game over",
+        "completed",
+        "scheduled",
+        "preview",
+        "pre-game",
+        "pregame",
+        "warmup",
+    }
+
     lineups: dict[str, Any] = {}
     for side_key in ("away", "home"):
         side_info = matchup[side_key]
@@ -511,9 +658,11 @@ async def fetch_matchup_starting_lineups(
         batters = _parse_batters_from_team_box(box_teams.get(side_key, {}))
         source = "confirmed"
         source_date = matchup.get("date")
-        if not batters:
+        if not batters and allow_previous_fallback:
             batters, source_date = await _fetch_previous_starting_lineup(client, team_id)
             source = "previous"
+        elif not batters:
+            source = "pending"
         opposing_key = "home" if side_key == "away" else "away"
         opposing_pitcher = matchup.get(opposing_key, {}).get("probablePitcher")
         pitcher_id = (opposing_pitcher or {}).get("id")
@@ -735,8 +884,73 @@ def summarize_team_scoring(rows: list[dict[str, Any]], runs_list: list[int]) -> 
     }
 
 
+def _matchup_dict_from_schedule_game(
+    game: dict[str, Any], focus_team_id: int
+) -> dict[str, Any]:
+    home_team = game["teams"]["home"]["team"]
+    home_id = int(home_team["id"])
+    venue_raw = (game.get("venue") or {}).get("name") or ""
+    game_date_iso = game.get("gameDate")
+    timing = format_matchup_timing(
+        str(game_date_iso or ""),
+        venue_raw=venue_raw,
+        home_team_id=home_id,
+        official_date=game.get("officialDate"),
+    )
+
+    def side_info(side: str) -> dict[str, Any]:
+        team = game["teams"][side]["team"]
+        probable = game["teams"][side].get("probablePitcher")
+        return {
+            "teamId": team["id"],
+            "teamName": team_name_zh(team_id=team["id"], english_name=team.get("name")),
+            "probablePitcher": (
+                {"id": probable["id"], "fullName": probable["fullName"]} if probable else None
+            ),
+        }
+
+    return {
+        "date": timing["date"],
+        "officialDate": game.get("officialDate"),
+        "gameDate": game_date_iso,
+        "gamePk": game.get("gamePk"),
+        "status": game.get("status", {}).get("detailedState"),
+        "stadium": timing["stadium"],
+        "timeTaiwan": timing["timeTaiwan"],
+        "timeLocal": timing["timeLocal"],
+        "focusTeamId": focus_team_id,
+        "away": side_info("away"),
+        "home": side_info("home"),
+    }
+
+
+async def fetch_matchup_by_game_pk(
+    client: httpx.AsyncClient,
+    game_pk: int,
+    focus_team_id: int,
+) -> dict[str, Any] | None:
+    """Exact game by gamePk — used when user picks a slate row."""
+    resp = await client.get(
+        f"{MLB_BASE}/schedule",
+        params={"sportId": 1, "gamePk": game_pk, "hydrate": "probablePitcher"},
+    )
+    resp.raise_for_status()
+    games = [g for d in resp.json().get("dates", []) for g in d.get("games", [])]
+    if not games:
+        return None
+    game = games[0]
+    away_id = int(game["teams"]["away"]["team"]["id"])
+    home_id = int(game["teams"]["home"]["team"]["id"])
+    if focus_team_id not in {away_id, home_id}:
+        return None
+    return _matchup_dict_from_schedule_game(game, focus_team_id)
+
+
 async def fetch_next_matchup(
-    client: httpx.AsyncClient, focus_team_id: int
+    client: httpx.AsyncClient,
+    focus_team_id: int,
+    *,
+    expected: ExpectedMatchup | None = None,
 ) -> dict[str, Any] | None:
     start = mlb_schedule_start()
     end = start + timedelta(days=15)
@@ -778,43 +992,42 @@ async def fetch_next_matchup(
         return (priority, g.get("gameDate") or "")
 
     upcoming.sort(key=_sort_key)
-    game = upcoming[0]
 
-    home_team = game["teams"]["home"]["team"]
-    home_id = int(home_team["id"])
-    venue_raw = (game.get("venue") or {}).get("name") or ""
-    game_date_iso = game.get("gameDate")
-    timing = format_matchup_timing(
-        str(game_date_iso or ""),
-        venue_raw=venue_raw,
-        home_team_id=home_id,
-        official_date=game.get("officialDate"),
-    )
+    if expected and expected.game_pk:
+        by_pk = await fetch_matchup_by_game_pk(client, expected.game_pk, focus_team_id)
+        if by_pk:
+            return by_pk
 
-    def side_info(side: str) -> dict[str, Any]:
-        team = game["teams"][side]["team"]
-        probable = game["teams"][side].get("probablePitcher")
-        return {
-            "teamId": team["id"],
-            "teamName": team_name_zh(team_id=team["id"], english_name=team.get("name")),
-            "probablePitcher": (
-                {"id": probable["id"], "fullName": probable["fullName"]} if probable else None
-            ),
-        }
+    game: dict[str, Any] | None = None
+    if expected:
+        for candidate in upcoming:
+            home_id_c = int(candidate["teams"]["home"]["team"]["id"])
+            game_date_iso = candidate.get("gameDate")
+            venue_raw = (candidate.get("venue") or {}).get("name") or ""
+            timing = format_matchup_timing(
+                str(game_date_iso or ""),
+                venue_raw=venue_raw,
+                home_team_id=home_id_c,
+                official_date=str(candidate.get("officialDate") or "")[:10] or None,
+            )
+            away_id = int(candidate["teams"]["away"]["team"]["id"])
+            home_id = int(candidate["teams"]["home"]["team"]["id"])
+            row = {
+                "date": timing["date"],
+                "officialDate": str(candidate.get("officialDate") or "")[:10],
+                "awayTeamId": away_id,
+                "homeTeamId": home_id,
+                "gamePk": candidate.get("gamePk"),
+            }
+            if expected.matches_schedule_row(row):
+                game = candidate
+                break
+        if game is None:
+            return None
+    else:
+        game = upcoming[0]
 
-    return {
-        "date": timing["date"],
-        "officialDate": game.get("officialDate"),
-        "gameDate": game_date_iso,
-        "gamePk": game.get("gamePk"),
-        "status": game.get("status", {}).get("detailedState"),
-        "stadium": timing["stadium"],
-        "timeTaiwan": timing["timeTaiwan"],
-        "timeLocal": timing["timeLocal"],
-        "focusTeamId": focus_team_id,
-        "away": side_info("away"),
-        "home": side_info("home"),
-    }
+    return _matchup_dict_from_schedule_game(game, focus_team_id)
 
 
 async def fetch_upcoming_game(client: httpx.AsyncClient, team_id: int) -> dict[str, Any] | None:
@@ -1070,7 +1283,8 @@ async def analyze_team_scoring(
         team_score = game["teams"][side].get("score")
         opponent_score = game["teams"]["away" if side == "home" else "home"].get("score")
         row = {
-            "date": game.get("officialDate"),
+            "date": mlb_game_row_date(game),
+            "officialDate": game.get("officialDate"),
             "gamePk": game.get("gamePk"),
             "opponent": team_name_zh(
                 team_id=opponent_info.get("id"),
@@ -1205,8 +1419,60 @@ async def _build_side_panel(
     }
 
 
+async def apply_mlb_playsport_probable_pitchers(
+    matchup: dict[str, Any], client: httpx.AsyncClient | None = None
+) -> None:
+    """Fill missing MLB probable pitchers from playsport when statsapi returns None."""
+    needs_away = not (matchup.get("away") or {}).get("probablePitcher")
+    needs_home = not (matchup.get("home") or {}).get("probablePitcher")
+    if not needs_away and not needs_home:
+        return
+    try:
+        from app.playsport_starters import fetch_playsport_starters
+
+        if client is None:
+            async with httpx.AsyncClient(timeout=15.0) as owned:
+                ps_games = await fetch_playsport_starters(owned)
+        else:
+            ps_games = await fetch_playsport_starters(client)
+        away_name = (matchup["away"].get("teamName") or "").lower()
+        home_name = (matchup["home"].get("teamName") or "").lower()
+        matchup_date = (matchup.get("date") or "")[:10]
+        for pg in ps_games:
+            if pg.get("league") != "mlb":
+                continue
+            pg_date = (pg.get("gameDate") or "")[:10]
+            if matchup_date and pg_date and pg_date != matchup_date:
+                continue
+            if (
+                pg.get("awayTeam", "").lower() in away_name
+                or away_name in pg.get("awayTeam", "").lower()
+            ) and (
+                pg.get("homeTeam", "").lower() in home_name
+                or home_name in pg.get("homeTeam", "").lower()
+            ):
+                if needs_away and pg.get("awayStarter"):
+                    matchup["away"]["probablePitcher"] = {
+                        "id": None,
+                        "fullName": pg["awayStarter"],
+                    }
+                if needs_home and pg.get("homeStarter"):
+                    matchup["home"]["probablePitcher"] = {
+                        "id": None,
+                        "fullName": pg["homeStarter"],
+                    }
+                break
+    except Exception:
+        pass
+
+
 async def analyze_matchup(
-    focus_team_id: int, game_count: int = 10, *, lite: bool = False
+    focus_team_id: int,
+    game_count: int = 10,
+    *,
+    lite: bool = False,
+    expected: ExpectedMatchup | None = None,
+    game_pk: int | None = None,
 ) -> dict[str, Any]:
     limits = (
         httpx.Limits(max_connections=8, max_keepalive_connections=4)
@@ -1214,40 +1480,15 @@ async def analyze_matchup(
         else httpx.Limits(max_connections=24, max_keepalive_connections=12)
     )
     async with httpx.AsyncClient(timeout=60.0, limits=limits) as client:
-        matchup = await fetch_next_matchup(client, focus_team_id)
+        pk = game_pk or (expected.game_pk if expected else None)
+        if pk:
+            matchup = await fetch_matchup_by_game_pk(client, pk, focus_team_id)
+        else:
+            matchup = await fetch_next_matchup(client, focus_team_id, expected=expected)
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
-        # playsport fallback for probable pitchers when statsapi returns None
-        needs_away = not matchup["away"].get("probablePitcher")
-        needs_home = not matchup["home"].get("probablePitcher")
-        if needs_away or needs_home:
-            try:
-                from app.playsport_starters import fetch_playsport_starters
-                ps_games = await fetch_playsport_starters(client)
-                away_name = (matchup["away"].get("teamName") or "").lower()
-                home_name = (matchup["home"].get("teamName") or "").lower()
-                for pg in ps_games:
-                    if pg.get("league") != "mlb":
-                        continue
-                    if (
-                        pg.get("awayTeam", "").lower() in away_name
-                        or away_name in pg.get("awayTeam", "").lower()
-                    ) and (
-                        pg.get("homeTeam", "").lower() in home_name
-                        or home_name in pg.get("homeTeam", "").lower()
-                    ):
-                        if needs_away and pg.get("awayStarter"):
-                            matchup["away"]["probablePitcher"] = {
-                                "id": None, "fullName": pg["awayStarter"]
-                            }
-                        if needs_home and pg.get("homeStarter"):
-                            matchup["home"]["probablePitcher"] = {
-                                "id": None, "fullName": pg["homeStarter"]
-                            }
-                        break
-            except Exception:
-                pass
+        await apply_mlb_playsport_probable_pitchers(matchup, client)
 
         away_id = matchup["away"]["teamId"]
         home_id = matchup["home"]["teamId"]
@@ -1266,13 +1507,13 @@ async def analyze_matchup(
                 fetch_matchup_starting_lineups(client, matchup),
             )
         situational = build_matchup_situational(away_panel, home_panel)
-        away_panel = strip_panel_internals(away_panel)
-        home_panel = strip_panel_internals(home_panel)
 
     result = {
         "focusTeamId": focus_team_id,
         "matchup": {
             "date": matchup["date"],
+            "taiwanDate": matchup.get("date"),
+            "officialDate": matchup.get("officialDate"),
             "gameDate": matchup.get("gameDate"),
             "gamePk": matchup["gamePk"],
             "status": matchup["status"],
@@ -1356,12 +1597,16 @@ async def rebuild_pitcher_dependent_fields(
         home["probablePitcher"] = home_prob
     away["pitcherAnalysis"] = away_pa
     home["pitcherAnalysis"] = home_pa
-    # Keep existing team scoring panels if present; only refresh pitcher-derived blocks.
     data = dict(data)
-    data["away"] = strip_panel_internals(away)
-    data["home"] = strip_panel_internals(home)
+    data["away"] = away
+    data["home"] = home
     data["startingLineups"] = starting_lineups
-    data["situational"] = build_matchup_situational(data["away"], data["home"])
+    new_situational = build_matchup_situational(away, home)
+    from app.inning_comparison import merge_team_situational_from_cache
+
+    data["situational"] = merge_team_situational_from_cache(
+        new_situational, data.get("situational")
+    )
     return data
 
 
@@ -1380,7 +1625,8 @@ async def analyze_team_first_five(team_id: int, game_count: int = 10) -> dict[st
 
             rows.append(
                 {
-                    "date": game.get("officialDate"),
+                    "date": mlb_game_row_date(game),
+                    "officialDate": game.get("officialDate"),
                     "gamePk": game.get("gamePk"),
                     "opponent": team_name_zh(
                         team_id=opponent_info.get("id"),

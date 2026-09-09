@@ -1,11 +1,11 @@
 /**
  * Shared lineup fetch/display for MLB, NPB, CPBL pages.
- * Avoids wiping visible lineups when matchup poll returns empty startingLineups.
  */
 window.LineupLoader = (function () {
   const LINEUP_FETCH_TIMEOUT_MS = 120000;
   const LINEUP_POLL_MS = 4000;
   const MAX_LINEUP_POLLS = 45;
+  const MIN_LINEUP_BATTERS = 7;
 
   let lineupPollTimer = null;
   let lineupPollAttempts = 0;
@@ -16,10 +16,41 @@ window.LineupLoader = (function () {
     return `${league || ""}:${teamId || ""}:${games || ""}`;
   }
 
+  function sideCount(lineups, side) {
+    return lineups?.[side]?.batters?.length ?? 0;
+  }
+
   function lineupsReady(lineups) {
-    const away = lineups?.away?.batters?.length ?? 0;
-    const home = lineups?.home?.batters?.length ?? 0;
-    return away > 0 || home > 0;
+    return (
+      sideCount(lineups, "away") >= MIN_LINEUP_BATTERS &&
+      sideCount(lineups, "home") >= MIN_LINEUP_BATTERS
+    );
+  }
+
+  function lineupsPartial(lineups) {
+    if (!lineups || lineupsReady(lineups)) return false;
+    return (
+      sideCount(lineups, "away") >= MIN_LINEUP_BATTERS ||
+      sideCount(lineups, "home") >= MIN_LINEUP_BATTERS
+    );
+  }
+
+  function lineupsPending(lineups) {
+    if (!lineups || lineupsReady(lineups) || lineupsPartial(lineups)) return false;
+    const sides = [lineups.away, lineups.home].filter(Boolean);
+    if (!sides.length) return true;
+    return sides.every((side) => {
+      const source = String(side.source || "").toLowerCase();
+      return source === "pending" || source === "";
+    });
+  }
+
+  function showLineupPending(attempt = 0) {
+    const suffix =
+      attempt > 0
+        ? `（${attempt}/${MAX_LINEUP_POLLS}，持續檢查中…）`
+        : "（持續檢查中…）";
+    showLineupLoading(`先發打線尚未公布${suffix}`);
   }
 
   function clearLineupPollTimer() {
@@ -47,14 +78,29 @@ window.LineupLoader = (function () {
     if (root) root.innerHTML = "";
   }
 
-  async function fetchLineupsWhenReady({ apiPath, teamId, games, fetchWithTimeout, force = false }) {
+  async function fetchLineupsWhenReady({
+    apiPath,
+    teamId,
+    games,
+    fetchWithTimeout,
+    force = false,
+    pick = null,
+  }) {
     clearLineupPollTimer();
     lineupPollAttempts = 0;
+    let firstForce = Boolean(force);
 
     const poll = async () => {
       try {
         const qs = new URLSearchParams({ team_id: teamId, games: String(games) });
-        if (force) qs.set("force", "true");
+        if (firstForce) qs.set("force", "true");
+        if (window.SiteConfig?.appendPickQuery) {
+          SiteConfig.appendPickQuery(qs, pick);
+        } else if (pick?.date) {
+          qs.set("expected_date", String(pick.date).slice(0, 10));
+          qs.set("expected_away", String(pick.awayTeamId));
+          qs.set("expected_home", String(pick.homeTeamId));
+        }
         const resp = await fetchWithTimeout(`${apiPath}/lineup?${qs}`, LINEUP_FETCH_TIMEOUT_MS);
         const lineups = window.ApiUtils
           ? await ApiUtils.readJson(resp)
@@ -64,15 +110,26 @@ window.LineupLoader = (function () {
           syncLineup(lineups);
           return;
         }
+        if (resp.ok && lineupsPartial(lineups)) {
+          lastGoodLineups = lineups;
+          syncLineup(lineups);
+          showLineupLoading(
+            `已載入部分打線，等待另一隊先發公布…（${lineupPollAttempts + 1}/${MAX_LINEUP_POLLS}）`
+          );
+        } else if (resp.ok && lineupsPending(lineups)) {
+          showLineupPending(lineupPollAttempts + 1);
+        }
       } catch (_) {
         /* retry */
       }
 
+      firstForce = false;
       lineupPollAttempts += 1;
       if (lineupPollAttempts < MAX_LINEUP_POLLS) {
-        // Only force on the first attempt; retries use rebuilt cache.
-        force = false;
         lineupPollTimer = setTimeout(poll, LINEUP_POLL_MS);
+      } else if (lineupsPartial(lastGoodLineups)) {
+        syncLineup(lastGoodLineups);
+        showLineupLoading("另一隊先發尚未公布，請稍後再按「立即更新」。");
       } else {
         showLineupLoading("打線載入失敗，請按「立即更新」重試。");
       }
@@ -83,7 +140,7 @@ window.LineupLoader = (function () {
 
   function ensureLineups(
     lineups,
-    { apiPath, league, teamId, games, fetchWithTimeout, force = false, matchup = null } = {}
+    { apiPath, league, teamId, games, fetchWithTimeout, force = false, matchup = null, pick = null } = {}
   ) {
     const key = lineupKey(league, teamId, games);
     if (key !== lastLineupKey) {
@@ -92,16 +149,19 @@ window.LineupLoader = (function () {
       clearLineupPollTimer();
     }
 
+    const resolvedPick =
+      pick ||
+      (window.ApiUtils?.matchupPick && league ? ApiUtils.matchupPick.load(league) : null);
+
+    const cfg = window.SiteConfig || {};
     const needsLive =
-      force || (SiteConfig.lineupsNeedLiveRefresh && SiteConfig.lineupsNeedLiveRefresh(lineups, matchup));
+      force ||
+      (cfg.lineupsNeedLiveRefresh && cfg.lineupsNeedLiveRefresh(lineups, matchup));
     const useLiveOnStatic =
-      SiteConfig.isStatic &&
-      league &&
-      needsLive &&
-      typeof fetchWithTimeout === "function";
+      cfg.isStatic && league && needsLive && typeof fetchWithTimeout === "function";
     const effectiveApiPath = useLiveOnStatic
-      ? SiteConfig.liveLineupApi(league)
-      : SiteConfig.isStatic
+      ? cfg.liveLineupApi(league)
+      : cfg.isStatic
         ? null
         : apiPath;
 
@@ -114,6 +174,15 @@ window.LineupLoader = (function () {
       }
     } else if (lineupsReady(lastGoodLineups)) {
       syncLineup(lastGoodLineups);
+    } else if (lineupsPartial(lineups)) {
+      lastGoodLineups = lineups;
+      syncLineup(lineups);
+      showLineupLoading("已載入部分打線，等待另一隊先發公布…");
+    } else if (lineupsPartial(lastGoodLineups)) {
+      syncLineup(lastGoodLineups);
+      showLineupLoading("已載入部分打線，等待另一隊先發公布…");
+    } else if (lineupsPending(lineups)) {
+      showLineupPending();
     } else {
       showLineupLoading(
         useLiveOnStatic
@@ -130,7 +199,8 @@ window.LineupLoader = (function () {
         teamId,
         games,
         fetchWithTimeout,
-        force: Boolean(force && !lineupsReady(lineups)),
+        force: Boolean(force),
+        pick: resolvedPick,
       });
     }
   }

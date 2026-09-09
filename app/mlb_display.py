@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.team_names import team_name_zh
@@ -92,6 +92,32 @@ def taiwan_date_from_iso(iso: str | None) -> str | None:
     if not dt:
         return None
     return dt.astimezone(TPE).date().isoformat()
+
+
+def mlb_slate_display_date(tw_date: str, time_taiwan: str = "") -> str:
+    """Before noon Taiwan = previous evening's MLB slate (local betting habit)."""
+    if not tw_date:
+        return tw_date
+    hour = 12
+    if time_taiwan and ":" in time_taiwan:
+        try:
+            hour = int(str(time_taiwan).split(":", 1)[0])
+        except ValueError:
+            hour = 12
+    if hour < 12:
+        try:
+            return (date.fromisoformat(tw_date[:10]) - timedelta(days=1)).isoformat()
+        except ValueError:
+            return tw_date
+    return tw_date[:10]
+
+
+def mlb_game_row_date(game: dict[str, Any]) -> str:
+    """Recent-game table date: Taiwan wall clock when gameDate exists."""
+    tw = taiwan_date_from_iso(game.get("gameDate"))
+    if tw:
+        return tw
+    return str(game.get("officialDate") or "")[:10]
 
 
 def taiwan_time_from_iso(iso: str | None) -> str:
@@ -191,6 +217,7 @@ def apply_mlb_matchup_timing(data: dict[str, Any]) -> dict[str, Any]:
         official_date=str(matchup.get("officialDate") or matchup.get("date") or "")[:10] or None,
     )
     matchup["date"] = timing["date"]
+    matchup["taiwanDate"] = timing["date"]
     matchup["timeTaiwan"] = timing["timeTaiwan"]
     matchup["timeLocal"] = timing["timeLocal"]
     matchup["stadium"] = timing["stadium"]

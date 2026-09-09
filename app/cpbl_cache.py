@@ -13,7 +13,7 @@ from app.inning_comparison import a_table_payload_complete
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 17
+CACHE_VERSION = 19
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "cpbl_cache.json"
@@ -58,7 +58,47 @@ def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
     return best
 
 
-def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
+def _load_schedule_games_for_upgrade() -> list[dict[str, Any]]:
+    path = BASE_DIR / "data" / "cpbl_schedule.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        games = raw.get("games")
+        if isinstance(games, list):
+            return games
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return []
+
+
+def _pitcher_name_matches(left: str, right: str) -> bool:
+    a = left.replace(" ", "").replace("　", "").strip()
+    b = right.replace(" ", "").replace("　", "").strip()
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
+def _count_final_starts_on_schedule(
+    schedule: list[dict[str, Any]], team_id: int, pitcher_name: str
+) -> int:
+    count = 0
+    for game in schedule:
+        if str(game.get("status") or "").strip().lower() != "final":
+            continue
+        away_id = int(game.get("awayTeamId") or 0)
+        home_id = int(game.get("homeTeamId") or 0)
+        if team_id not in {away_id, home_id}:
+            continue
+        is_home = home_id == team_id
+        probable = (
+            game.get("homeProbablePitcher") if is_home else game.get("awayProbablePitcher")
+        ) or ""
+        if _pitcher_name_matches(pitcher_name, probable):
+            count += 1
+    return count
+
+
+def cache_needs_upgrade(entry: dict[str, Any], *, games: int = DEFAULT_GAMES) -> bool:
     data = entry.get("data") or {}
     if int(data.get("cacheVersion") or 0) < CACHE_VERSION:
         return True
@@ -77,9 +117,23 @@ def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
     # Incomplete official firstSno (often 6–7) should be rebuilt to a full 9-man card.
     if (away_batters and away_batters < 9) or (home_batters and home_batters < 9):
         return True
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
 
-    return pitcher_analysis_missing_pitch_counts(data)
+    schedule = _load_schedule_games_for_upgrade()
+    expected_by_side: dict[str, int] = {}
+    for side in ("away", "home"):
+        panel = data.get(side) or {}
+        starter = ((panel.get("probablePitcher") or {}).get("fullName") or "").strip()
+        team_id = int(panel.get("teamId") or 0)
+        if starter and team_id and schedule:
+            expected_by_side[side] = _count_final_starts_on_schedule(
+                schedule, team_id, starter
+            )
+
+    from app.pitcher_rows import pitcher_analysis_needs_rebuild
+
+    return pitcher_analysis_needs_rebuild(
+        data, game_count=games, expected_starts_by_side=expected_by_side
+    )
 
 
 def get_a_table(team_id: int) -> dict[str, Any] | None:
@@ -122,6 +176,9 @@ def cached_team_count(games: int = DEFAULT_GAMES) -> int:
 
 
 async def store_matchup(team_id: int, games: int, data: dict[str, Any]) -> dict[str, Any]:
+    from app.matchup_integrity import sanitize_matchup_for_store
+
+    data = sanitize_matchup_for_store(data, "cpbl")
     entry = {"data": data, "updatedAt": _now_iso()}
     async with _lock:
         _store[_matchup_key(team_id, games)] = entry
@@ -154,6 +211,13 @@ def load_from_disk() -> None:
             if key.startswith("cpbl:matchup:v") or key.startswith("cpbl:atable:v")
         }
         _store.update(loaded)
+        from app.matchup_integrity import repair_league_store
+
+        repaired = repair_league_store(
+            _store, league="cpbl", key_prefix="cpbl:matchup:v"
+        )
+        if repaired:
+            save_to_disk()
     except (json.JSONDecodeError, OSError):
         pass
 
@@ -196,8 +260,11 @@ def wrap_matchup_response(
 ) -> dict[str, Any]:
     updated_at = entry["updatedAt"]
     next_refresh = _parse_time(updated_at) + CACHE_TTL
+    from app.matchup_integrity import guard_matchup_for_api
+
+    data = guard_matchup_for_api(copy.deepcopy(entry["data"]), "cpbl")
     return {
-        **copy.deepcopy(entry["data"]),
+        **data,
         "cacheVersion": CACHE_VERSION,
         "cachedAt": updated_at,
         "nextRefreshAt": next_refresh.isoformat(timespec="seconds"),

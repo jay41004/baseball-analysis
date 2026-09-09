@@ -1,11 +1,12 @@
 const PHILADELPHIA_ID = 143;
+const LEAGUE = "mlb";
 const STORAGE_KEY = "mlb_last_team";
 const REFRESH_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
 const EXPECTED_CACHE_VERSION = 17;
 
-const FETCH_TIMEOUT_MS = 90000;
+const FETCH_TIMEOUT_MS = 180000;
 const MAX_POLL_ATTEMPTS = 60;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
@@ -492,12 +493,7 @@ async function loadTeams() {
 }
 
 function isDataReady(data) {
-  if (data.loading) return false;
-  const hasGames = (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
-  if (hasGames) return true;
-  // Cloud header-only updates can return empty panels — do not poll forever.
-  if (data.refreshing) return false;
-  return Boolean(data.matchup?.date && data.away?.teamName && data.home?.teamName);
+  return ApiUtils.isMatchupDataReady(data);
 }
 
 function setBusy(isBusy, message) {
@@ -549,25 +545,28 @@ function teamGamesMissingScores(data) {
 }
 
 function needsFreshData(data, games) {
-  if (isDataReady(data)) {
-    if (teamGamesMissingScores(data)) {
-      return true;
-    }
+  const hasPanels =
+    (data.away?.games?.length ?? 0) >= Math.min(5, games) &&
+    (data.home?.games?.length ?? 0) >= Math.min(5, games);
+  if (data.refreshing && hasPanels && !teamGamesMissingScores(data)) {
     return false;
   }
   if (!data.cacheVersion || data.cacheVersion < expectedCacheVersion) {
     return true;
   }
-  const today = new Date().toISOString().slice(0, 10);
-  for (const side of ["away", "home"]) {
-    for (const game of data[side]?.games ?? []) {
-      if (game.date > today) return true;
-      if (game.result == null && game.firstFiveRuns === 0 && game.opponentStarter == null) {
-        return true;
+  if (!isDataReady(data)) {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
+    for (const side of ["away", "home"]) {
+      for (const game of data[side]?.games ?? []) {
+        if (game.date > today) return true;
+        if (game.result == null && game.firstFiveRuns === 0 && game.opponentStarter == null) {
+          return true;
+        }
       }
     }
+    return false;
   }
-  return false;
+  return teamGamesMissingScores(data);
 }
 
 async function loadMeta() {
@@ -598,6 +597,17 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
+    if (teamId) {
+      LineupLoader.ensureLineups(null, {
+        apiPath: SiteConfig.api("/api/mlb"),
+        league: "mlb",
+        teamId,
+        games,
+        fetchWithTimeout,
+        force: false,
+        matchup: null,
+      });
+    }
     if (!hasDisplayedData) {
       setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
     } else {
@@ -611,14 +621,36 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       cacheStatusEl.textContent = "靜態資料隨部署更新；正在向雲端抓取最新先發打線…";
     }
 
-    const url = SiteConfig.mlbMatchup(teamId, games, force && !SiteConfig.isStatic);
-    const { resp, data } = await ApiUtils.fetchJson(url, fetchWithTimeout, {
-      onWaiting(n, total) {
-        cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
+    const pick = ApiUtils.matchupPick.load(LEAGUE);
+    const { resp, data } = await ApiUtils.fetchMatchupForPick({
+      buildUrl: (tid, g, f, p) => SiteConfig.mlbMatchup(tid, g, f, p),
+      teamId,
+      games,
+      force: force && !SiteConfig.isStatic,
+      pick,
+      league: LEAGUE,
+      fetchFn: fetchWithTimeout,
+      fetchJsonOpts: {
+        onWaiting(n, total) {
+          cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
+        },
       },
     });
     if (token !== fetchToken) return;
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
+
+    renderMatchup(data, { skipIfUnchanged: isPoll });
+    hasDisplayedData = true;
+    LineupLoader.ensureLineups(data.startingLineups, {
+      apiPath: SiteConfig.api("/api/mlb"),
+      league: "mlb",
+      teamId,
+      games,
+      fetchWithTimeout,
+      force,
+      matchup: data.matchup,
+      pick: ApiUtils.matchupPick.load(LEAGUE),
+    });
 
     if (!force && allowAutoRetry && !isTeamSwitch && needsFreshData(data, games)) {
       cacheStatusEl.textContent = "偵測到舊資料，正在自動更新…";
@@ -627,19 +659,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       return fetchAnalysis(true, false, isPoll);
     }
 
-    renderMatchup(data, { skipIfUnchanged: isPoll });
-    hasDisplayedData = true;
     ready = isDataReady(data);
     if (ready) {
-      LineupLoader.ensureLineups(data.startingLineups, {
-        apiPath: SiteConfig.api("/api/mlb"),
-        league: "mlb",
-        teamId,
-        games,
-        fetchWithTimeout,
-        force,
-        matchup: data.matchup,
-      });
       syncATable(SiteConfig.api("/api/mlb"), teamId, data.aTable, { force, matchReady: true });
     }
 

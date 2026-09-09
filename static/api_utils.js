@@ -21,6 +21,15 @@ window.SiteConfig = (function () {
     return `${apiRoot}${path}`;
   }
 
+  function appendPickQuery(q, pick) {
+    if (!pick) return;
+    if (pick.gamePk) q.set("expected_game_pk", String(pick.gamePk));
+    if (!pick?.date) return;
+    q.set("expected_date", String(pick.date).slice(0, 10));
+    q.set("expected_away", String(pick.awayTeamId));
+    q.set("expected_home", String(pick.homeTeamId));
+  }
+
   return {
     isStatic,
     isGhPages,
@@ -33,28 +42,31 @@ window.SiteConfig = (function () {
     mlbTeams() {
       return isStatic ? dataUrl("mlb", "teams.json") : api("/api/teams");
     },
-    mlbMatchup(teamId, games, force) {
+    mlbMatchup(teamId, games, force, pick) {
       if (isStatic) return dataUrl("mlb", `matchup_${teamId}_${games}.json`);
       const q = new URLSearchParams({ team_id: teamId, games: String(games) });
       if (force) q.set("force", "true");
+      appendPickQuery(q, pick);
       return api(`/api/matchup?${q}`);
     },
     npbTeams() {
       return isStatic ? dataUrl("npb", "teams.json") : api("/api/npb/teams");
     },
-    npbMatchup(teamId, games, force) {
+    npbMatchup(teamId, games, force, pick) {
       if (isStatic) return dataUrl("npb", `matchup_${teamId}_${games}.json`);
       const q = new URLSearchParams({ team_id: teamId, games: String(games) });
       if (force) q.set("force", "true");
+      appendPickQuery(q, pick);
       return api(`/api/npb/matchup?${q}`);
     },
     cpblTeams() {
       return isStatic ? dataUrl("cpbl", "teams.json") : api("/api/cpbl/teams");
     },
-    cpblMatchup(teamId, games, force) {
+    cpblMatchup(teamId, games, force, pick) {
       if (isStatic) return dataUrl("cpbl", `matchup_${teamId}_${games}.json`);
       const q = new URLSearchParams({ team_id: teamId, games: String(games) });
       if (force) q.set("force", "true");
+      appendPickQuery(q, pick);
       return api(`/api/cpbl/matchup?${q}`);
     },
     meta() {
@@ -102,6 +114,7 @@ window.SiteConfig = (function () {
       }
       return false;
     },
+    appendPickQuery,
   };
 })();
 
@@ -183,7 +196,97 @@ window.ApiUtils = (function () {
     return matchupHasHeader(data);
   }
 
-  return { readJson, fetchJson, isHtmlBody, isMatchupDataReady, matchupHasHeader };
+  const PICK_SCHEMA_VERSION = 3;
+
+  const matchupPick = {
+    storageKey(league) {
+      return `picked_game_${league}`;
+    },
+    save(league, row) {
+      if (!row?.date && !row?.gamePk) return;
+      sessionStorage.setItem(
+        this.storageKey(league),
+        JSON.stringify({
+          v: PICK_SCHEMA_VERSION,
+          date: row.date,
+          awayTeamId: row.awayTeamId,
+          homeTeamId: row.homeTeamId,
+          gamePk: row.gamePk || null,
+          taiwanDate: row.taiwanDate || null,
+        })
+      );
+    },
+    load(league) {
+      try {
+        const raw = sessionStorage.getItem(this.storageKey(league));
+        if (!raw) return null;
+        const pick = JSON.parse(raw);
+        if (pick?.v !== PICK_SCHEMA_VERSION) {
+          sessionStorage.removeItem(this.storageKey(league));
+          return null;
+        }
+        return pick;
+      } catch (_) {
+        return null;
+      }
+    },
+    clear(league) {
+      sessionStorage.removeItem(this.storageKey(league));
+    },
+  };
+
+  function matchupMatchesPick(data, pick) {
+    if (!pick || !data) return true;
+    const pk = pick.gamePk ? Number(pick.gamePk) : null;
+    const hdrPk = data.matchup?.gamePk ? Number(data.matchup.gamePk) : null;
+    if (pk && hdrPk && pk === hdrPk) return true;
+    if (!pick?.date) return true;
+    const md = String(data.matchup?.date || "").slice(0, 10);
+    const od = String(data.matchup?.officialDate || "").slice(0, 10);
+    const away = String(data.away?.teamId ?? "");
+    const home = String(data.home?.teamId ?? "");
+    const pa = String(pick.awayTeamId);
+    const ph = String(pick.homeTeamId);
+    const pd = String(pick.date).slice(0, 10);
+    if (pd !== md && pd !== od) return false;
+    return (away === pa && home === ph) || (away === ph && home === pa);
+  }
+
+  async function fetchMatchupForPick({
+    buildUrl,
+    teamId,
+    games,
+    force,
+    pick,
+    league,
+    fetchFn,
+    fetchJsonOpts = {},
+  }) {
+    const load = async (tid, f, activePick = pick) =>
+      fetchJson(buildUrl(tid, games, f, activePick), fetchFn, fetchJsonOpts);
+    let primary = await load(teamId, force);
+    if (primary.data?.pickStale && pick && league && !force) {
+      primary = await load(teamId, true, pick);
+    }
+    if (!pick || matchupMatchesPick(primary.data, pick)) return primary;
+    const other =
+      String(teamId) === String(pick.awayTeamId) ? pick.homeTeamId : pick.awayTeamId;
+    const alt = await load(other, force);
+    if (matchupMatchesPick(alt.data, pick)) return alt;
+    if (!force && !SiteConfig.isStatic) return load(teamId, true);
+    return primary;
+  }
+
+  return {
+    readJson,
+    fetchJson,
+    isHtmlBody,
+    isMatchupDataReady,
+    matchupHasHeader,
+    matchupPick,
+    matchupMatchesPick,
+    fetchMatchupForPick,
+  };
 })();
 
 /** Shared matchup header helpers (today/tomorrow labels, starters). */
@@ -198,13 +301,26 @@ window.MatchupMeta = (function () {
     return t.toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
   }
 
-  function dayLabel(gameDateYmd) {
-    if (!gameDateYmd) return "";
+  function taiwanYmdMinusDays(ymd, days) {
+    const d = new Date(`${ymd}T12:00:00+08:00`);
+    d.setTime(d.getTime() - days * 86_400_000);
+    return d.toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
+  }
+
+  function dayLabel(officialDateYmd, taiwanDateYmd) {
+    const official = String(officialDateYmd || "").slice(0, 10);
+    const tw = String(taiwanDateYmd || "").slice(0, 10);
     const today = taiwanTodayYmd();
-    if (gameDateYmd === today) return "今日賽事";
-    if (gameDateYmd === taiwanTomorrowYmd()) return "明日賽事";
-    if (gameDateYmd < today) return "快照已過期";
-    return `${gameDateYmd} 賽事`;
+    const tomorrow = taiwanTomorrowYmd();
+    const usForTodayCol = taiwanYmdMinusDays(today, 1);
+    const usForTomorrowCol = taiwanYmdMinusDays(tomorrow, 1);
+    // 台灣今天欄→美國昨天；台灣明天欄→美國今天（例：台 9/7/9/8 → 美 9/6/9/7）
+    if (official === usForTodayCol) return "今日賽事";
+    if (official === usForTomorrowCol) return "明日賽事";
+    if (official && official < usForTodayCol) return "快照已過期";
+    if (tw === today) return "今日賽事";
+    if (tw === tomorrow) return "明日賽事";
+    return `${official || tw} 賽事`;
   }
 
   function formatGameTime(iso, timeTaiwan) {
@@ -222,20 +338,21 @@ window.MatchupMeta = (function () {
   }
 
   function buildMetaText(matchup, away, home) {
-    const gameDate = String(matchup?.date || "").slice(0, 10);
-    const label = dayLabel(gameDate);
-    const taiwanTime = formatGameTime(matchup?.gameDate, matchup?.timeTaiwan);
+    const us = String(matchup?.officialDate || "").slice(0, 10);
+    const tw = String(matchup?.taiwanDate || matchup?.date || "").slice(0, 10);
+    const time = matchup?.timeTaiwan || "";
+    const label = dayLabel(us, tw);
     const parts = [];
     if (label) parts.push(label);
-    if (gameDate) parts.push(gameDate);
-    if (matchup?.stadium) parts.push(String(matchup.stadium).replace(/\s+/g, " ").trim());
-    if (taiwanTime) parts.push(`台灣 ${taiwanTime}`);
+    if (us) parts.push(`美國 ${us}`);
+    if (tw && time) parts.push(`台灣 ${tw} ${time} 開球`);
+    else if (tw) parts.push(`台灣 ${tw}`);
     parts.push(matchup?.status || "Scheduled");
     const awayP = away?.probablePitcher?.fullName;
     const homeP = home?.probablePitcher?.fullName;
     if (awayP || homeP) {
       parts.push(`先發 ${awayP || "待定"} vs ${homeP || "待定"}`);
-    } else if (gameDate === taiwanTodayYmd()) {
+    } else if (us === taiwanTodayYmd()) {
       parts.push("先發：官網尚未公布");
     }
     return parts.join(" · ");

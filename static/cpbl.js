@@ -1,11 +1,12 @@
 const DEFAULT_TEAM_ID = 5;
+const LEAGUE = "cpbl";
 const STORAGE_KEY = "cpbl_last_team";
 const REFRESH_MS = 10 * 60 * 1000;
 const POLL_MS = 3000;
 const REFRESH_POLL_MS = 8000;
 const EXPECTED_CACHE_VERSION = 17;
 
-const FETCH_TIMEOUT_MS = 90000;
+const FETCH_TIMEOUT_MS = 180000;
 const MAX_POLL_ATTEMPTS = 120;
 
 let expectedCacheVersion = EXPECTED_CACHE_VERSION;
@@ -543,6 +544,7 @@ function teamGamesMissingScores(data) {
 }
 
 function needsFreshData(data, games) {
+  if (data.refreshing) return true;
   if (isDataReady(data)) {
     return teamGamesMissingScores(data);
   }
@@ -565,6 +567,17 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
+    if (teamId) {
+      LineupLoader.ensureLineups(null, {
+        apiPath: SiteConfig.api("/api/cpbl"),
+        league: "cpbl",
+        teamId,
+        games,
+        fetchWithTimeout,
+        force: false,
+        matchup: null,
+      });
+    }
     if (!hasDisplayedData) {
       setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");
     } else {
@@ -578,14 +591,36 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       cacheStatusEl.textContent = "靜態資料隨部署更新；正在向雲端抓取最新先發打線…";
     }
 
-    const url = SiteConfig.cpblMatchup(teamId, games, force && !SiteConfig.isStatic);
-    const { resp, data } = await ApiUtils.fetchJson(url, fetchWithTimeout, {
-      onWaiting(n, total) {
-        cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
+    const pick = ApiUtils.matchupPick.load(LEAGUE);
+    const { resp, data } = await ApiUtils.fetchMatchupForPick({
+      buildUrl: (tid, g, f, p) => SiteConfig.cpblMatchup(tid, g, f, p),
+      teamId,
+      games,
+      force: force && !SiteConfig.isStatic,
+      pick,
+      league: LEAGUE,
+      fetchFn: fetchWithTimeout,
+      fetchJsonOpts: {
+        onWaiting(n, total) {
+          cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
+        },
       },
     });
     if (token !== fetchToken) return;
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
+
+    renderMatchup(data, { skipIfUnchanged: isPoll });
+    hasDisplayedData = true;
+    LineupLoader.ensureLineups(data.startingLineups, {
+      apiPath: SiteConfig.api("/api/cpbl"),
+      league: "cpbl",
+      teamId,
+      games,
+      fetchWithTimeout,
+      force,
+      matchup: data.matchup,
+      pick: ApiUtils.matchupPick.load(LEAGUE),
+    });
 
     if (!force && allowAutoRetry && !isTeamSwitch && needsFreshData(data, games)) {
       cacheStatusEl.textContent = "偵測到舊資料，正在自動更新…";
@@ -594,19 +629,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       return fetchAnalysis(true, false, isPoll);
     }
 
-    renderMatchup(data, { skipIfUnchanged: isPoll });
-    hasDisplayedData = true;
     ready = isDataReady(data);
     if (ready) {
-      LineupLoader.ensureLineups(data.startingLineups, {
-        apiPath: SiteConfig.api("/api/cpbl"),
-        league: "cpbl",
-        teamId,
-        games,
-        fetchWithTimeout,
-        force,
-        matchup: data.matchup,
-      });
       syncATable(SiteConfig.api("/api/cpbl"), teamId, data.aTable, { force, matchReady: true });
     }
 

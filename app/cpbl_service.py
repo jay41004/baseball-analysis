@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ from app.inning_comparison import (
     build_matchup_situational,
     strip_panel_internals,
 )
+from app.matchup_pick import ExpectedMatchup
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,16 @@ _FETCH_SEM = asyncio.Semaphore(8)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEDULE_CACHE_FILE = BASE_DIR / "data" / "cpbl_schedule.json"
+SCHEDULE_DISK_VERSION = 2
 SCHEDULE_DISK_TTL = timedelta(hours=6)
 
 _shared_schedule: list[dict[str, Any]] | None = None
 _shared_box_cache: dict[str, dict[str, Any]] = {}
 _schedule_lock = asyncio.Lock()
+_schedule_synced_at: float = 0.0
+_schedule_enriched_at: float = 0.0
+_SCHEDULE_SYNC_INTERVAL_SEC = 180.0
+_SCHEDULE_ENRICH_INTERVAL_SEC = 600.0
 
 CSRF_JS = re.compile(r"RequestVerificationToken:\s*['\"]([^'\"]+)['\"]")
 CSRF_INPUT = re.compile(r'name="__RequestVerificationToken"[^>]*value="([^"]+)"')
@@ -702,6 +709,8 @@ def cpbl_lineups_need_rebuild(
             source_date = (side_data.get("sourceDate") or "")[:10]
             source = (side_data.get("source") or "").strip().lower()
             if source_date and source_date != matchup_date and status not in {"final"}:
+                if source == "previous":
+                    continue
                 return True
             if (
                 source != "confirmed"
@@ -1113,9 +1122,44 @@ async def _pitcher_acnt_map_for_box(
     return mapping
 
 
+def _schedule_latest_final_date(games: list[dict[str, Any]]) -> date | None:
+    latest: date | None = None
+    for game in games:
+        if str(game.get("status") or "").strip().lower() != "final":
+            continue
+        raw = str(game.get("date") or "")[:10]
+        if len(raw) < 10:
+            continue
+        try:
+            when = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        if latest is None or when > latest:
+            latest = when
+    return latest
+
+
+def _schedule_disk_stale_for_season(games: list[dict[str, Any]]) -> bool:
+    """Reject disk cache when the newest Final is too far behind (breaks 近3/近5)."""
+    latest = _schedule_latest_final_date(games)
+    if latest is None:
+        return True
+    month = date.today().month
+    if month not in range(3, 11):
+        return False
+    return (date.today() - latest).days > 3
+
+
+def _schedule_game_key(game: dict[str, Any]) -> tuple[str, Any]:
+    """CPBL reuses gameSno across dates — key must include date."""
+    return (str(game.get("date") or "")[:10], game.get("gameSno"))
+
+
 def _load_schedule_disk() -> list[dict[str, Any]] | None:
     try:
         raw = json.loads(SCHEDULE_CACHE_FILE.read_text(encoding="utf-8"))
+        if int(raw.get("version") or 1) < SCHEDULE_DISK_VERSION:
+            return None
         updated = datetime.fromisoformat(raw["updatedAt"])
         if updated.tzinfo is None:
             updated = updated.replace(tzinfo=timezone.utc)
@@ -1123,6 +1167,8 @@ def _load_schedule_disk() -> list[dict[str, Any]] | None:
             return None
         games = raw.get("games")
         if isinstance(games, list) and len(games) >= 80:
+            if _schedule_disk_stale_for_season(games):
+                return None
             return games
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         pass
@@ -1130,9 +1176,11 @@ def _load_schedule_disk() -> list[dict[str, Any]] | None:
 
 
 def invalidate_shared_schedule_cache(*, wipe_disk: bool = False) -> None:
-    global _shared_schedule, _shared_box_cache
+    global _shared_schedule, _shared_box_cache, _schedule_synced_at, _schedule_enriched_at
     _shared_schedule = None
     _shared_box_cache.clear()
+    _schedule_synced_at = 0.0
+    _schedule_enriched_at = 0.0
     if wipe_disk:
         try:
             SCHEDULE_CACHE_FILE.unlink(missing_ok=True)
@@ -1145,7 +1193,11 @@ def _save_schedule_disk(games: list[dict[str, Any]]) -> None:
         SCHEDULE_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         SCHEDULE_CACHE_FILE.write_text(
             json.dumps(
-                {"updatedAt": datetime.now(timezone.utc).isoformat(), "games": games},
+                {
+                    "updatedAt": datetime.now(timezone.utc).isoformat(),
+                    "version": SCHEDULE_DISK_VERSION,
+                    "games": games,
+                },
                 ensure_ascii=False,
             ),
             encoding="utf-8",
@@ -1217,7 +1269,7 @@ class CpblClient:
         return payload
 
     async def fetch_schedule_pool(self, months_back: int = 6) -> list[dict[str, Any]]:
-        global _shared_schedule
+        global _shared_schedule, _schedule_synced_at, _schedule_enriched_at
         async with _schedule_lock:
             if _shared_schedule is None:
                 disk_games = _load_schedule_disk()
@@ -1228,10 +1280,14 @@ class CpblClient:
                     _shared_schedule = await self._build_schedule_pool(months_back)
                     _save_schedule_disk(_shared_schedule)
                     logger.info("Built CPBL schedule pool (%s games)", len(_shared_schedule))
-                # Always re-sync current (+ next) month so live vs Final stays accurate.
+            if (
+                _shared_schedule is not None
+                and time.monotonic() - _schedule_synced_at >= _SCHEDULE_SYNC_INTERVAL_SEC
+            ):
                 try:
                     await self._sync_near_term_schedule(_shared_schedule)
                     _save_schedule_disk(_shared_schedule)
+                    _schedule_synced_at = time.monotonic()
                 except Exception:
                     logger.exception("CPBL near-term schedule sync failed")
 
@@ -1246,6 +1302,8 @@ class CpblClient:
                 repaired = True
         if repaired:
             _save_schedule_disk(games)
+        if time.monotonic() - _schedule_enriched_at < _SCHEDULE_ENRICH_INTERVAL_SEC:
+            return games
         try:
             from app.cpbl_official import enrich_schedule_probable_pitchers
 
@@ -1284,20 +1342,23 @@ class CpblClient:
                         g["homeProbablePitcher"] = pg["homeStarter"]
         except Exception:
             logger.exception("playsport CPBL enrich failed")
+        _schedule_enriched_at = time.monotonic()
 
         return games
 
     def _merge_normalized_schedule_game(
-        self, games: list[dict[str, Any]], by_sno: dict[Any, dict[str, Any]], normalized: dict[str, Any]
+        self, games: list[dict[str, Any]], by_key: dict[tuple[str, Any], dict[str, Any]], normalized: dict[str, Any]
     ) -> None:
-        game_sno = normalized.get("gameSno")
-        if game_sno is None:
+        key = _schedule_game_key(normalized)
+        if key[1] is None:
             return
-        existing = by_sno.get(game_sno)
+        existing = by_key.get(key)
         if existing is None:
             games.append(normalized)
-            by_sno[game_sno] = normalized
+            by_key[key] = normalized
             return
+        existing["date"] = normalized.get("date")
+        existing["year"] = normalized.get("year") or existing.get("year")
         existing["status"] = normalized["status"]
         existing["awayScore"] = normalized.get("awayScore")
         existing["homeScore"] = normalized.get("homeScore")
@@ -1337,16 +1398,22 @@ class CpblClient:
                 return None, schedule_page
 
     async def _sync_near_term_schedule(self, games: list[dict[str, Any]]) -> None:
-        """Refresh current and next month so In Progress vs Final stays correct."""
+        """Refresh recent months so In Progress vs Final stays correct."""
         today = date.today()
-        months = [(today.year, today.month)]
+        months: list[tuple[int, int]] = []
+        prev_year, prev_month = today.year, today.month - 1
+        if prev_month <= 0:
+            prev_month = 12
+            prev_year -= 1
+        months.append((prev_year, prev_month))
+        months.append((today.year, today.month))
         next_year, next_month = today.year, today.month + 1
         if next_month > 12:
             next_month = 1
             next_year += 1
         months.append((next_year, next_month))
 
-        by_sno = {g.get("gameSno"): g for g in games if g.get("gameSno") is not None}
+        by_key = {_schedule_game_key(g): g for g in games if g.get("gameSno") is not None}
         schedule_page: httpx.Response | None = None
         for year_value, month_value in months:
             payload, schedule_page = await self._fetch_month_payload(
@@ -1357,7 +1424,7 @@ class CpblClient:
             for raw in _parse_json_blob(payload.get("GameDatas")):
                 normalized = _normalize_schedule_game(raw)
                 if normalized:
-                    self._merge_normalized_schedule_game(games, by_sno, normalized)
+                    self._merge_normalized_schedule_game(games, by_key, normalized)
             await asyncio.sleep(0.05)
         games.sort(key=lambda game: (game.get("date", ""), game.get("gameSno") or 0))
 
@@ -1381,7 +1448,7 @@ class CpblClient:
             add_month(y, m)
 
         games: list[dict[str, Any]] = []
-        seen_snos: set[Any] = set()
+        seen_keys: set[tuple[str, Any]] = set()
         schedule_page: httpx.Response | None = None
 
         async def ingest(payload: dict[str, Any]) -> None:
@@ -1391,10 +1458,10 @@ class CpblClient:
                 normalized = _normalize_schedule_game(raw)
                 if not normalized:
                     continue
-                game_sno = normalized.get("gameSno")
-                if game_sno in seen_snos:
+                key = _schedule_game_key(normalized)
+                if key[1] is None or key in seen_keys:
                     continue
-                seen_snos.add(game_sno)
+                seen_keys.add(key)
                 games.append(normalized)
 
         try:
@@ -1483,12 +1550,16 @@ class CpblClient:
             return None
         await _enrich_box_pitch_counts(self, parsed, game_sno, year)
         schedule = await self.fetch_schedule_pool()
+        target_date = (parsed.get("date") or "")[:10] if parsed else ""
         for game in schedule:
-            if game.get("gameSno") == game_sno:
-                parsed["awayTeamId"] = game["awayTeamId"]
-                parsed["homeTeamId"] = game["homeTeamId"]
-                parsed["date"] = game.get("date")
-                break
+            if game.get("gameSno") != game_sno:
+                continue
+            if target_date and str(game.get("date") or "")[:10] != target_date:
+                continue
+            parsed["awayTeamId"] = game["awayTeamId"]
+            parsed["homeTeamId"] = game["homeTeamId"]
+            parsed["date"] = game.get("date")
+            break
 
         _shared_box_cache[cache_key] = parsed
         return parsed
@@ -1557,7 +1628,12 @@ async def _fetch_boxes_limited(
     return list(await asyncio.gather(*[fetch_one(meta) for meta in metas]))
 
 
-async def fetch_next_matchup(client: CpblClient, focus_team_id: int) -> dict[str, Any] | None:
+async def fetch_next_matchup(
+    client: CpblClient,
+    focus_team_id: int,
+    *,
+    expected: ExpectedMatchup | None = None,
+) -> dict[str, Any] | None:
     schedule = await client.fetch_schedule_pool()
     today = datetime.now(TPE).date().isoformat()
 
@@ -1584,6 +1660,11 @@ async def fetch_next_matchup(client: CpblClient, focus_team_id: int) -> dict[str
 
     pool.sort(key=sort_key)
     game = pool[0]
+    if expected:
+        for candidate in pool:
+            if expected.matches_schedule_row(candidate):
+                game = candidate
+                break
 
     # Live schedule rows often blank Visiting/HomePitcherName — pull from box.
     if (
@@ -1755,12 +1836,12 @@ async def analyze_team_scoring(
     scored_pool = away_pool + home_pool
 
     needed_meta: list[dict[str, Any]] = []
-    seen_snos: set[Any] = set()
+    seen_keys: set[tuple[str, Any]] = set()
     for meta in panel_meta:
-        game_sno = meta.get("gameSno")
-        if game_sno in seen_snos:
+        key = _schedule_game_key(meta)
+        if key[1] is None or key in seen_keys:
             continue
-        seen_snos.add(game_sno)
+        seen_keys.add(key)
         needed_meta.append(meta)
 
     parsed_list = await _fetch_boxes_limited(client, needed_meta)
@@ -1974,6 +2055,7 @@ async def analyze_pitcher_starts(
         "pitcherName": pitcher_name,
         "games": display_rows,
         "_startPool": rows,
+        "startPoolSize": len(rows),
         "summary": summarize_pitcher_summary(display_rows, runs_list),
     }
 
@@ -2229,10 +2311,15 @@ async def _build_side_panel(
     }
 
 
-async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str, Any]:
+async def analyze_matchup(
+    focus_team_id: int,
+    game_count: int = 10,
+    *,
+    expected: ExpectedMatchup | None = None,
+) -> dict[str, Any]:
     client = CpblClient()
     try:
-        matchup = await fetch_next_matchup(client, focus_team_id)
+        matchup = await fetch_next_matchup(client, focus_team_id, expected=expected)
         if not matchup:
             raise ValueError("找不到下一場比賽")
 
@@ -2246,8 +2333,6 @@ async def analyze_matchup(focus_team_id: int, game_count: int = 10) -> dict[str,
             fetch_matchup_starting_lineups(client, matchup),
         )
         situational = build_matchup_situational(away_panel, home_panel)
-        away_panel = strip_panel_internals(away_panel)
-        home_panel = strip_panel_internals(home_panel)
     finally:
         await client.close()
 
@@ -2393,8 +2478,6 @@ async def rebuild_pitcher_dependent_fields(
             if (new_block.get("gameCount") or 0) == 0 and (old_block.get("gameCount") or 0) > 0:
                 situational[key] = old_block
 
-        away = strip_panel_internals(away)
-        home = strip_panel_internals(home)
     finally:
         await client.close()
 

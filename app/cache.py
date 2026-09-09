@@ -14,7 +14,7 @@ from app.team_names import localize_analysis
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 17
+CACHE_VERSION = 18
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "cache.json"
@@ -55,7 +55,15 @@ def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
     data = entry.get("data") or {}
     if int(data.get("cacheVersion") or 0) < CACHE_VERSION:
         return True
-    return pitcher_analysis_missing_pitch_counts(data)
+    if pitcher_analysis_missing_pitch_counts(data):
+        return True
+    away = data.get("away") or {}
+    home = data.get("home") or {}
+    if (away.get("games") or home.get("games")) and not (
+        away.get("_scoredPool") or home.get("_scoredPool")
+    ):
+        return True
+    return False
 
 
 def get_a_table(team_id: int) -> dict[str, Any] | None:
@@ -99,6 +107,9 @@ def cached_team_count(games: int = DEFAULT_GAMES) -> int:
 
 
 async def store_matchup(team_id: int, games: int, data: dict[str, Any]) -> dict[str, Any]:
+    from app.matchup_integrity import sanitize_matchup_for_store
+
+    data = sanitize_matchup_for_store(data, "mlb")
     entry = {"data": data, "updatedAt": _now_iso()}
     async with _lock:
         _store[_matchup_key(team_id, games)] = entry
@@ -126,6 +137,13 @@ def load_from_disk() -> None:
         if isinstance(raw, dict):
             _store.update(raw)
             _migrate_cache_keys()
+            from app.matchup_integrity import repair_league_store
+
+            repaired = repair_league_store(
+                _store, league="mlb", key_prefix=f"matchup:v{CACHE_VERSION}:"
+            )
+            if repaired:
+                save_to_disk()
     except (json.JSONDecodeError, OSError):
         pass
 
@@ -177,7 +195,9 @@ def wrap_matchup_response(
 ) -> dict[str, Any]:
     updated_at = entry["updatedAt"]
     next_refresh = _parse_time(updated_at) + CACHE_TTL
-    data = localize_matchup(dict(entry["data"]))
+    from app.matchup_integrity import guard_matchup_for_api
+
+    data = guard_matchup_for_api(localize_matchup(dict(entry["data"])), "mlb")
     return {
         **data,
         "cacheVersion": CACHE_VERSION,
