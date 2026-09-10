@@ -823,7 +823,7 @@ async def api_npb_matchup(
             or (expected is not None and not expected.matches_cache_entry(cached))
             or needs_pitcher_patch
         )
-        if cached and needs_pitcher_patch and not force:
+        if cached and not force:
             cached = await ensure_npb_pitchers_fresh(
                 team_id, games, cached, expected=expected
             )

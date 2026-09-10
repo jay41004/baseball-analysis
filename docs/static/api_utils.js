@@ -59,6 +59,12 @@ window.SiteConfig = (function () {
       appendPickQuery(q, pick);
       return api(`/api/npb/matchup?${q}`);
     },
+    npbMatchupLive(teamId, games, force, pick) {
+      const q = new URLSearchParams({ team_id: teamId, games: String(games) });
+      if (force) q.set("force", "true");
+      appendPickQuery(q, pick);
+      return `${liveApiRoot}/api/npb/matchup?${q}`;
+    },
     cpblTeams() {
       return isStatic ? dataUrl("cpbl", "teams.json") : api("/api/cpbl/teams");
     },
@@ -83,6 +89,27 @@ window.SiteConfig = (function () {
     /** Render live API for lineup-only refresh on static GitHub Pages. */
     liveLineupApi(league) {
       return `${liveApiRoot}/api/${league}`;
+    },
+    jstTodayYmd() {
+      return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Tokyo" });
+    },
+    /** Static Pages: upgrade matchup header (date/pitchers) from Render when stale. */
+    matchupNeedsLiveRefresh(league, data, pick) {
+      if (!isStatic || !data) return false;
+      const matchup = data.matchup || {};
+      const md = String(matchup.date || "").slice(0, 10);
+      const today =
+        league === "npb" ? this.jstTodayYmd() : new Date().toLocaleDateString("en-CA", {
+            timeZone: "Asia/Taipei",
+          });
+      if (md && md < today) return true;
+      if (pick?.date) {
+        const pd = String(pick.date).slice(0, 10);
+        if (pd && md && pd !== md) return true;
+      }
+      if (league === "npb" && md === today) return true;
+      if (league !== "npb" && window.MatchupMeta?.isStaleMatchup?.(matchup)) return true;
+      return false;
     },
     /** True when static snapshot lineups should be upgraded from Render. */
     lineupsNeedLiveRefresh(lineups, matchup) {

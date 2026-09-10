@@ -7,7 +7,9 @@ on:
   schedule:
     # Every 2 hours (UTC). Taiwan ≈ UTC+8 → even hours local.
     - cron: "15 */2 * * *"
-    # Game-day window TW 16:00–24:00 ≈ UTC 08:00–16:00 — hourly lineup refresh
+    # NPB afternoon TW 10:00–16:00 ≈ UTC 02:00–08:00 — hourly pitcher refresh
+    - cron: "10 2-8 * * *"
+    # Evening TW 16:00–24:00 ≈ UTC 08:00–16:00 — hourly lineup refresh
     - cron: "5 8-15 * * *"
   workflow_dispatch:
   push:
@@ -101,4 +103,4 @@ jobs:
           user_name: github-actions[bot]
           user_email: github-actions[bot]@users.noreply.github.com
 
-# trigger: MLB slate Taiwan/US date alignment (2026-09-09)
+# trigger: NPB live pitcher patch + afternoon refresh (2026-09-10)

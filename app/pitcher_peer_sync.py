@@ -104,6 +104,7 @@ def patch_probable_pitcher_header(
     new_pitcher: dict | None,
     *,
     game_changed: bool,
+    force_refresh: bool = False,
 ) -> bool:
     """Apply header refresh rules for probablePitcher. Returns True if starter name changed."""
     old_name = pitcher_name(panel).strip()
@@ -123,7 +124,10 @@ def patch_probable_pitcher_header(
     if new_name and not old_name:
         panel["probablePitcher"] = new_pitcher
         return False
-    # Same game with a known starter — never replace from a light header fetch.
+    if force_refresh and new_name and old_name != new_name:
+        panel["probablePitcher"] = new_pitcher
+        panel.pop("pitcherAnalysis", None)
+        return True
     return False
 
 

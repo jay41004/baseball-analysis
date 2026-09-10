@@ -466,6 +466,72 @@ async def repair_mlb_cache_from_issues(
     return {"refreshedTeams": refreshed, "failedTeams": failed}
 
 
+async def expected_npb_matchups() -> dict[int, dict[str, Any]]:
+    """Live NPB schedule truth: team_id → next matchup with probable pitchers."""
+    from app.npb_service import NpbClient, fetch_next_matchup
+
+    client = NpbClient()
+    out: dict[int, dict[str, Any]] = {}
+    try:
+        for tid in range(1, 13):
+            try:
+                matchup = await fetch_next_matchup(client, tid)
+            except Exception:
+                logger.exception("expected_npb_matchups failed for team %s", tid)
+                continue
+            if not matchup:
+                continue
+            out[tid] = {
+                "date": matchup.get("date"),
+                "awayTeamId": int(matchup["away"]["teamId"]),
+                "homeTeamId": int(matchup["home"]["teamId"]),
+                "away": matchup.get("away") or {},
+                "home": matchup.get("home") or {},
+            }
+    finally:
+        await client.close()
+    return out
+
+
+def audit_npb_against_expected(
+    team_id: int,
+    data: dict[str, Any],
+    expected: dict[str, Any] | None,
+) -> dict[str, list[str]]:
+    issues: list[str] = []
+    warnings: list[str] = []
+    if not expected:
+        warnings.append(f"npb team {team_id}: no live schedule matchup to compare")
+        return {"issues": issues, "warnings": warnings}
+
+    matchup = data.get("matchup") or {}
+    exp_date = str(expected.get("date") or "")[:10]
+    got_date = str(matchup.get("date") or "")[:10]
+    if exp_date and got_date and exp_date != got_date:
+        issues.append(
+            f"npb team {team_id}: wrong matchup date cached={got_date} expected={exp_date}"
+        )
+
+    for side in ("away", "home"):
+        exp_name = pitcher_name(expected.get(side) or {})
+        got_name = pitcher_name(data.get(side) or {})
+        exp_team = int((expected.get(side) or {}).get("teamId") or 0)
+        got_team = int((data.get(side) or {}).get("teamId") or 0)
+        if exp_team and got_team and exp_team != got_team:
+            issues.append(
+                f"npb team {team_id}: {side} teamId cached={got_team} expected={exp_team}"
+            )
+        if exp_name and got_name and exp_name != got_name:
+            issues.append(
+                f"npb team {team_id}: {side} pitcher cached={got_name!r} expected={exp_name!r}"
+            )
+        elif exp_name and not got_name:
+            issues.append(
+                f"npb team {team_id}: {side} pitcher missing (expects {exp_name!r})"
+            )
+    return {"issues": issues, "warnings": warnings}
+
+
 async def repair_npb_cache_from_issues(
     issues: list[str], *, games: int = DEFAULT_GAMES
 ) -> dict[str, Any]:
@@ -756,17 +822,35 @@ async def validate_npb_cache(
     load_from_disk()
     if offline:
         ids = _cached_team_ids_from_disk("npb", games)
+        expected: dict[int, dict[str, Any]] = {}
     else:
         from app.npb_service import fetch_npb_teams
 
         teams = await fetch_npb_teams()
         ids = [int(t["id"]) for t in teams]
-    report = _audit_cached_league(
-        "npb",
-        team_ids=ids,
-        get_entry=lambda tid: get_matchup(tid, games),
-        min_games=5,
-    )
+        expected = await expected_npb_matchups()
+
+    issues: list[str] = []
+    warnings: list[str] = []
+    for tid in ids:
+        entry = get_matchup(tid, games)
+        data = unwrap_matchup_payload(entry)
+        if not data:
+            issues.append(f"npb team {tid}: missing matchup cache")
+            continue
+        base = audit_matchup_data("npb", tid, data, min_games=5)
+        cross = audit_npb_against_expected(tid, data, expected.get(tid))
+        issues.extend(base["issues"])
+        issues.extend(cross["issues"])
+        warnings.extend(base["warnings"])
+        warnings.extend(cross["warnings"])
+
+    report = {
+        "ok": len(issues) == 0,
+        "issues": issues,
+        "warnings": warnings,
+        "teamCount": len(ids),
+    }
     repair_result = None
     if repair and report.get("issues"):
         logger.warning(

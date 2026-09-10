@@ -179,6 +179,19 @@ async def _audit_cpbl_docs_vs_live(data_dir: Path) -> dict[str, Any]:
     return {"issues": issues, "warnings": warnings, "expected": expected}
 
 
+async def _audit_npb_docs_vs_live(data_dir: Path) -> dict[str, Any]:
+    from app.data_validate import audit_npb_against_expected, expected_npb_matchups
+
+    expected = await expected_npb_matchups()
+    issues: list[str] = []
+    warnings: list[str] = []
+    for tid, data in _load_matchups(data_dir, "npb"):
+        cross = audit_npb_against_expected(tid, data, expected.get(tid))
+        issues.extend(cross["issues"])
+        warnings.extend(cross["warnings"])
+    return {"issues": issues, "warnings": warnings, "expected": expected}
+
+
 async def run_audit(*, data_dir: Path, repair: bool) -> dict[str, Any]:
     api = await _probe_cpbl_schedule_api()
     cpbl = audit_league_files(data_dir, "cpbl", min_teams=4, min_games=5)
@@ -186,6 +199,13 @@ async def run_audit(*, data_dir: Path, repair: bool) -> dict[str, Any]:
     mlb = audit_league_files(data_dir, "mlb", min_teams=20, min_games=5)
 
     live_cross = await _audit_cpbl_docs_vs_live(data_dir)
+    npb_live = await _audit_npb_docs_vs_live(data_dir)
+    npb["issues"] = list(npb.get("issues") or []) + list(npb_live.get("issues") or [])
+    npb["warnings"] = list(npb.get("warnings") or []) + list(npb_live.get("warnings") or [])
+    npb["liveCross"] = {
+        "issueCount": len(npb_live.get("issues") or []),
+        "warningCount": len(npb_live.get("warnings") or []),
+    }
     cpbl["issues"] = list(cpbl.get("issues") or []) + list(live_cross.get("issues") or [])
     cpbl["warnings"] = list(cpbl.get("warnings") or []) + list(
         live_cross.get("warnings") or []

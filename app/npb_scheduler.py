@@ -59,6 +59,155 @@ def _apply_probable_pitchers_from_matchup(data: dict, matchup: dict[str, Any]) -
     return changed
 
 
+def _npb_jst_today() -> str:
+    from datetime import datetime, timedelta, timezone
+
+    jst = timezone(timedelta(hours=9))
+    return datetime.now(jst).date().isoformat()
+
+
+def npb_header_stale(data: dict[str, Any], expected: ExpectedMatchup | None = None) -> bool:
+    """True when cached header is from a past game or does not match the picked slate row."""
+    from app.matchup_pick import ExpectedMatchup as Pick
+
+    matchup = data.get("matchup") or {}
+    md = str(matchup.get("date") or "")[:10]
+    today = _npb_jst_today()
+    if md and md < today:
+        return True
+    if expected and not Pick(
+        date=expected.date,
+        away_id=expected.away_id,
+        home_id=expected.home_id,
+        game_pk=expected.game_pk,
+    ).matches_payload(data):
+        return True
+    return False
+
+
+def _npb_should_live_patch(
+    data: dict[str, Any], expected: ExpectedMatchup | None = None
+) -> bool:
+    """Today's NPB games need live schedule checks (afternoon pitcher announcements)."""
+    if npb_header_stale(data, expected):
+        return True
+    md = str((data.get("matchup") or {}).get("date") or "")[:10]
+    return md == _npb_jst_today()
+
+
+def _apply_live_npb_header(
+    data: dict[str, Any],
+    matchup: dict[str, Any],
+    *,
+    team_id: int,
+    games: int,
+    prev_snapshot: dict[str, Any] | None,
+) -> bool:
+    """Patch matchup date/teams/probable pitchers from a live schedule row."""
+    from app.pitcher_peer_sync import (
+        merge_probable_pitchers_from_cache,
+        patch_probable_pitcher_header,
+    )
+
+    old_away = int((data.get("away") or {}).get("teamId") or 0)
+    old_home = int((data.get("home") or {}).get("teamId") or 0)
+    new_away = int(matchup["away"]["teamId"])
+    new_home = int(matchup["home"]["teamId"])
+    old_matchup = data.get("matchup") or {}
+    old_game_date = str(old_matchup.get("date") or "")[:10]
+    new_game_date = str(matchup.get("date") or "")[:10]
+    game_changed = bool(old_game_date and new_game_date and old_game_date != new_game_date)
+
+    data["cacheVersion"] = CACHE_VERSION
+    data["focusTeamId"] = team_id
+    data["matchup"] = {
+        "date": matchup.get("date"),
+        "gameDate": matchup.get("gameDate"),
+        "gameSno": matchup.get("gameSno"),
+        "status": matchup.get("status"),
+        "stadium": matchup.get("stadium"),
+    }
+
+    changed = game_changed
+    if old_away and old_home and {old_away, old_home} == {new_away, new_home}:
+        if old_away == new_home and old_home == new_away:
+            data["away"], data["home"] = data["home"], data["away"]
+        for side in ("away", "home"):
+            panel = data.get(side) or {}
+            src = matchup[side]
+            panel["teamId"] = src["teamId"]
+            panel["teamName"] = src.get("teamName") or panel.get("teamName")
+            if patch_probable_pitcher_header(
+                panel,
+                src.get("probablePitcher"),
+                game_changed=game_changed,
+                force_refresh=True,
+            ):
+                changed = True
+            data[side] = panel
+    else:
+        for side in ("away", "home"):
+            src = matchup[side]
+            data[side] = {
+                "teamId": src["teamId"],
+                "teamName": src.get("teamName") or "",
+                "probablePitcher": src.get("probablePitcher"),
+                "games": (data.get(side) or {}).get("games") or [],
+                "summary": (data.get(side) or {}).get("summary") or {},
+            }
+        changed = True
+
+    if prev_snapshot:
+        merge_probable_pitchers_from_cache(
+            data, prev_snapshot, league="npb", fill_only=True
+        )
+    return changed
+
+
+async def patch_npb_header_from_live(
+    team_id: int,
+    games: int,
+    cached: dict,
+    *,
+    expected: ExpectedMatchup | None = None,
+) -> dict:
+    """Lightweight NPB.jp schedule scrape — safe on Render cloud-lite."""
+    from app.npb_service import (
+        NpbClient,
+        apply_playsport_probable_pitchers,
+        fetch_next_matchup,
+    )
+
+    import copy
+
+    client = NpbClient()
+    try:
+        matchup = await fetch_next_matchup(client, team_id, expected=expected)
+        if matchup:
+            await apply_playsport_probable_pitchers(matchup)
+    finally:
+        await client.close()
+
+    if not matchup:
+        return cached
+
+    data = copy.deepcopy(cached.get("data") or {})
+    prev_snapshot = copy.deepcopy(data)
+    changed = _apply_live_npb_header(
+        data,
+        matchup,
+        team_id=team_id,
+        games=games,
+        prev_snapshot=prev_snapshot,
+    )
+    if not changed:
+        return cached
+
+    await store_matchup(team_id, games, data)
+    await _mirror_pitchers_to_peer(data, games, team_id)
+    return get_matchup(team_id, games) or cached
+
+
 async def ensure_npb_pitchers_fresh(
     team_id: int,
     games: int,
@@ -75,12 +224,21 @@ async def ensure_npb_pitchers_fresh(
         rebuild_pitcher_dependent_fields,
     )
 
+    data = (cached.get("data") or {}) if cached else {}
     if is_cloud_lite():
+        if cached and _npb_should_live_patch(data, expected):
+            return await patch_npb_header_from_live(
+                team_id, games, cached, expected=expected
+            )
         return cached
 
     import copy
 
-    data = copy.deepcopy(cached.get("data") or {})
+    data = copy.deepcopy(data)
+    if _npb_should_live_patch(data, expected):
+        return await patch_npb_header_from_live(
+            team_id, games, cached, expected=expected
+        )
     if not probable_pitchers_missing(data):
         return cached
 
@@ -274,7 +432,12 @@ async def refresh_matchup_header(
             panel["teamId"] = src["teamId"]
             panel["teamName"] = src.get("teamName") or src.get("nameZh") or panel.get("teamName")
             new_pitcher = src.get("probablePitcher")
-            patch_probable_pitcher_header(panel, new_pitcher, game_changed=game_changed)
+            patch_probable_pitcher_header(
+                panel,
+                new_pitcher,
+                game_changed=game_changed,
+                force_refresh=True,
+            )
             data[side] = panel
     else:
         empty_summary = {

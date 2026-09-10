@@ -91,8 +91,11 @@ function updateCacheStatus(data) {
   if (!SiteConfig.isStatic && data.cacheVersion && data.cacheVersion < expectedCacheVersion) {
     text += " · 請按「立即更新」或 Ctrl+F5";
   }
-  if (SiteConfig.isStatic && data.matchup && MatchupMeta.isStaleMatchup(data.matchup)) {
-    text += " · 快照已過期，請等 GitHub Actions 更新或開本機";
+  if (SiteConfig.isStatic && data.matchup) {
+    const pick = ApiUtils.matchupPick.load(LEAGUE);
+    if (SiteConfig.matchupNeedsLiveRefresh(LEAGUE, data, pick)) {
+      text += " · 快照先發可能過期，已嘗試向雲端確認";
+    }
   }
   if (data.refreshing) text += " · 背景更新中…";
   cacheStatusEl.textContent = text;
@@ -548,9 +551,17 @@ function teamGamesMissingScores(data) {
 
 function needsFreshData(data, games) {
   if (isDataReady(data)) {
-    return teamGamesMissingScores(data);
+    if (teamGamesMissingScores(data)) return true;
+    const pick = ApiUtils.matchupPick.load(LEAGUE);
+    if (SiteConfig.matchupNeedsLiveRefresh(LEAGUE, data, pick)) return true;
+    return false;
   }
   return !data.cacheVersion || data.cacheVersion < expectedCacheVersion;
+}
+
+function buildNpbMatchupUrl(teamId, games, force, pick, useLive) {
+  if (useLive) return SiteConfig.npbMatchupLive(teamId, games, force, pick);
+  return SiteConfig.npbMatchup(teamId, games, force, pick);
 }
 
 async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = false, isTeamSwitch = false) {
@@ -594,8 +605,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     }
 
     const pick = ApiUtils.matchupPick.load(LEAGUE);
-    const { resp, data } = await ApiUtils.fetchMatchupForPick({
-      buildUrl: (tid, g, f, p) => SiteConfig.npbMatchup(tid, g, f, p),
+    const fetchOpts = {
       teamId,
       games,
       force: force && !SiteConfig.isStatic,
@@ -607,8 +617,28 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
           cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
         },
       },
+    };
+    let { resp, data } = await ApiUtils.fetchMatchupForPick({
+      ...fetchOpts,
+      buildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, false),
     });
     if (token !== fetchToken) return;
+    if (
+      SiteConfig.isStatic &&
+      resp.ok &&
+      SiteConfig.matchupNeedsLiveRefresh(LEAGUE, data, pick)
+    ) {
+      cacheStatusEl.textContent = "快照先發可能過期，正在向雲端確認最新先發…";
+      const live = await ApiUtils.fetchMatchupForPick({
+        ...fetchOpts,
+        buildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, true),
+      });
+      if (token !== fetchToken) return;
+      if (live.resp.ok) {
+        resp = live.resp;
+        data = live.data;
+      }
+    }
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
     renderMatchup(data, { skipIfUnchanged: isPoll });
