@@ -551,10 +551,7 @@ function teamGamesMissingScores(data) {
 
 function needsFreshData(data, games) {
   if (isDataReady(data)) {
-    if (teamGamesMissingScores(data)) return true;
-    const pick = ApiUtils.matchupPick.load(LEAGUE);
-    if (SiteConfig.matchupNeedsLiveRefresh(LEAGUE, data, pick)) return true;
-    return false;
+    return teamGamesMissingScores(data);
   }
   return !data.cacheVersion || data.cacheVersion < expectedCacheVersion;
 }
@@ -580,16 +577,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
-    if (teamId) {
-      LineupLoader.ensureLineups(null, {
-        apiPath: SiteConfig.api("/api/npb"),
-        league: "npb",
-        teamId,
-        games,
-        fetchWithTimeout,
-        force: false,
-        matchup: null,
-      });
+    if (teamId && !SiteConfig.isStatic) {
+      LineupLoader.showLineupLoading("打線載入中…");
     }
     if (!hasDisplayedData) {
       setBusy(true, force ? "正在更新資料…" : "載入中，請稍候…");

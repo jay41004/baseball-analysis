@@ -11,6 +11,36 @@ window.LineupLoader = (function () {
   let lineupPollAttempts = 0;
   let lastGoodLineups = null;
   let lastLineupKey = null;
+  let lineupFetchGeneration = 0;
+
+  function lineupMatchesContext(lineups, context) {
+    if (!lineups || !context) return false;
+    const gameDate = String(context.gameDate || "").slice(0, 10);
+    if (!gameDate) return true;
+    for (const side of ["away", "home"]) {
+      const sideData = lineups[side] || {};
+      const count = sideData.batters?.length ?? 0;
+      if (!count) continue;
+      const sourceDate = String(sideData.sourceDate || "").slice(0, 10);
+      const source = String(sideData.source || "").trim().toLowerCase();
+      if (sourceDate && sourceDate !== gameDate) return false;
+      if (source && source !== "confirmed" && source !== "pending" && sourceDate !== gameDate) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function buildLineupContext({ league, teamId, games, matchup, pick }) {
+    return {
+      league,
+      teamId: String(teamId || ""),
+      games: String(games || ""),
+      gameDate: String(matchup?.date || pick?.date || "").slice(0, 10),
+      awayTeamId: String(pick?.awayTeamId || ""),
+      homeTeamId: String(pick?.homeTeamId || ""),
+    };
+  }
 
   function lineupKey(league, teamId, games) {
     return `${league || ""}:${teamId || ""}:${games || ""}`;
@@ -85,12 +115,16 @@ window.LineupLoader = (function () {
     fetchWithTimeout,
     force = false,
     pick = null,
+    context = null,
   }) {
     clearLineupPollTimer();
     lineupPollAttempts = 0;
     let firstForce = Boolean(force);
+    const generation = ++lineupFetchGeneration;
+    const activeContext = context || buildLineupContext({ teamId, games, pick });
 
     const poll = async () => {
+      if (generation !== lineupFetchGeneration) return;
       try {
         const qs = new URLSearchParams({ team_id: teamId, games: String(games) });
         if (firstForce) qs.set("force", "true");
@@ -102,15 +136,16 @@ window.LineupLoader = (function () {
           qs.set("expected_home", String(pick.homeTeamId));
         }
         const resp = await fetchWithTimeout(`${apiPath}/lineup?${qs}`, LINEUP_FETCH_TIMEOUT_MS);
+        if (generation !== lineupFetchGeneration) return;
         const lineups = window.ApiUtils
           ? await ApiUtils.readJson(resp)
           : await resp.json();
-        if (resp.ok && lineupsReady(lineups)) {
+        if (resp.ok && lineupsReady(lineups) && lineupMatchesContext(lineups, activeContext)) {
           lastGoodLineups = lineups;
           syncLineup(lineups);
           return;
         }
-        if (resp.ok && lineupsPartial(lineups)) {
+        if (resp.ok && lineupsPartial(lineups) && lineupMatchesContext(lineups, activeContext)) {
           lastGoodLineups = lineups;
           syncLineup(lineups);
           showLineupLoading(
@@ -125,9 +160,13 @@ window.LineupLoader = (function () {
 
       firstForce = false;
       lineupPollAttempts += 1;
+      if (generation !== lineupFetchGeneration) return;
       if (lineupPollAttempts < MAX_LINEUP_POLLS) {
         lineupPollTimer = setTimeout(poll, LINEUP_POLL_MS);
-      } else if (lineupsPartial(lastGoodLineups)) {
+      } else if (
+        lineupsPartial(lastGoodLineups) &&
+        lineupMatchesContext(lastGoodLineups, activeContext)
+      ) {
         syncLineup(lastGoodLineups);
         showLineupLoading("另一隊先發尚未公布，請稍後再按「立即更新」。");
       } else {
@@ -152,11 +191,21 @@ window.LineupLoader = (function () {
     const resolvedPick =
       pick ||
       (window.ApiUtils?.matchupPick && league ? ApiUtils.matchupPick.load(league) : null);
+    const context = buildLineupContext({
+      league,
+      teamId,
+      games,
+      matchup,
+      pick: resolvedPick,
+    });
 
     const cfg = window.SiteConfig || {};
+    const snapshotOk =
+      lineupsReady(lineups) && lineupMatchesContext(lineups, context);
     const needsLive =
-      force ||
-      (cfg.lineupsNeedLiveRefresh && cfg.lineupsNeedLiveRefresh(lineups, matchup));
+      !snapshotOk &&
+      (force ||
+        (cfg.lineupsNeedLiveRefresh && cfg.lineupsNeedLiveRefresh(lineups, matchup)));
     const useLiveOnStatic =
       cfg.isStatic && league && needsLive && typeof fetchWithTimeout === "function";
     const effectiveApiPath = useLiveOnStatic
@@ -165,14 +214,14 @@ window.LineupLoader = (function () {
         ? null
         : apiPath;
 
-    if (lineupsReady(lineups)) {
+    if (snapshotOk) {
       lastGoodLineups = lineups;
       syncLineup(lineups);
       if (!force && !needsLive) {
         clearLineupPollTimer();
         return;
       }
-    } else if (lineupsReady(lastGoodLineups)) {
+    } else if (lineupsReady(lastGoodLineups) && lineupMatchesContext(lastGoodLineups, context)) {
       syncLineup(lastGoodLineups);
     } else if (lineupsPartial(lineups)) {
       lastGoodLineups = lineups;
@@ -193,7 +242,7 @@ window.LineupLoader = (function () {
       );
     }
 
-    if (effectiveApiPath && teamId && typeof fetchWithTimeout === "function") {
+    if (effectiveApiPath && teamId && typeof fetchWithTimeout === "function" && needsLive) {
       fetchLineupsWhenReady({
         apiPath: effectiveApiPath,
         teamId,
@@ -201,6 +250,7 @@ window.LineupLoader = (function () {
         fetchWithTimeout,
         force: Boolean(force),
         pick: resolvedPick,
+        context,
       });
     }
   }
