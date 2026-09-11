@@ -1,0 +1,65 @@
+{
+  "generatedAt": "2026-09-09T00:37:41.319170+00:00",
+  "cpblApi": {
+    "base": "https://cpbl.com.tw",
+    "ok": false,
+    "status": 500,
+    "detail": "http 500",
+    "schedulePage": 200
+  },
+  "cpbl": {
+    "league": "cpbl",
+    "teams": 6,
+    "thinPanels": 0,
+    "missingPitchers": 0,
+    "issues": [],
+    "warnings": [
+      "cpbl team 4: 客場先發情境 empty despite starter '瑪帝斯'",
+      "cpbl team 4: 主場先發情境 empty despite starter '曹祐齊'",
+      "cpbl team 5: 客場先發情境 empty despite starter '瑪帝斯'",
+      "cpbl team 5: 主場先發情境 empty despite starter '曹祐齊'"
+    ],
+    "liveCross": {
+      "issueCount": 0,
+      "warningCount": 0
+    },
+    "missingPitchersAfterRepair": 0
+  },
+  "npb": {
+    "league": "npb",
+    "teams": 12,
+    "thinPanels": 0,
+    "missingPitchers": 0,
+    "issues": [],
+    "warnings": []
+  },
+  "mlb": {
+    "league": "mlb",
+    "teams": 30,
+    "thinPanels": 0,
+    "missingPitchers": 0,
+    "issues": [],
+    "warnings": [
+      "mlb team 134: away Bryan Reynolds recent3Avg='.667' very high for 3 games",
+      "mlb team 145: away Bryan Reynolds recent3Avg='.667' very high for 3 games"
+    ]
+  },
+  "repair": {
+    "repairedTeams": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "fullRefreshedTeams": [],
+    "failedTeams": [],
+    "issuesRemaining": 0,
+    "afterIssues": [],
+    "afterOk": true
+  },
+  "critical": [],
+  "liveSoftIssues": [],
+  "ok": true
+}
