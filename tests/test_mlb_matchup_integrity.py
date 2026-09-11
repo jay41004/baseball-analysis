@@ -207,6 +207,39 @@ class PitcherAnalysisRestoreTests(unittest.TestCase):
 
 
 class ProbablePitcherGuardTests(unittest.TestCase):
+    def test_fill_only_does_not_revert_live_starter_update(self) -> None:
+        new = {
+            "matchup": {"gamePk": 823736},
+            "home": {
+                "teamId": 158,
+                "probablePitcher": {"fullName": "Dustin May", "id": 669160},
+            },
+        }
+        old = {
+            "matchup": {"gamePk": 823736},
+            "home": {
+                "teamId": 158,
+                "probablePitcher": {"fullName": "Shane Drohan", "id": 675660},
+            },
+        }
+        merge_probable_pitchers_from_cache(new, old, league="mlb", fill_only=True)
+        self.assertEqual(new["home"]["probablePitcher"]["fullName"], "Dustin May")
+
+    def test_fill_only_still_fills_blank_starter(self) -> None:
+        new = {
+            "matchup": {"gamePk": 1},
+            "home": {"teamId": 158, "probablePitcher": None},
+        }
+        old = {
+            "matchup": {"gamePk": 1},
+            "home": {
+                "teamId": 158,
+                "probablePitcher": {"fullName": "Dustin May", "id": 1},
+            },
+        }
+        merge_probable_pitchers_from_cache(new, old, league="mlb", fill_only=True)
+        self.assertEqual(new["home"]["probablePitcher"]["fullName"], "Dustin May")
+
     def test_same_game_header_does_not_replace_known_starter(self) -> None:
         panel = {"probablePitcher": {"fullName": "Jack Perkins", "id": 1}}
         patch_probable_pitcher_header(

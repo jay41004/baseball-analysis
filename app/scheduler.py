@@ -149,7 +149,12 @@ async def refresh_matchup_header(
             panel["teamId"] = src["teamId"]
             panel["teamName"] = src["teamName"]
             new_pitcher = src.get("probablePitcher")
-            patch_probable_pitcher_header(panel, new_pitcher, game_changed=game_changed)
+            patch_probable_pitcher_header(
+                panel,
+                new_pitcher,
+                game_changed=game_changed,
+                force_refresh=True,
+            )
             data[side] = panel
     else:
         # Opponents changed — keep correct header; drop stale panels.

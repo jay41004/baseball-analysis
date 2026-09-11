@@ -87,7 +87,8 @@ def merge_probable_pitchers_from_cache(
             keep_old = True
         elif old_name != new_name:
             if fill_only:
-                keep_old = True
+                # fill_only protects blanks only — live header refresh must win over stale cache.
+                keep_old = False
             else:
                 old_score = _pitcher_trust_score(old_pitcher)
                 new_score = _pitcher_trust_score(new_pitcher)
