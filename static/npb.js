@@ -577,6 +577,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
+    LineupLoader.cancelPending();
     if (teamId && !SiteConfig.isStatic) {
       LineupLoader.showLineupLoading("打線載入中…");
     }
@@ -623,9 +624,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
         buildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, true),
       });
       if (token !== fetchToken) return;
-      if (live.resp.ok) {
-        resp = live.resp;
-        data = live.data;
+      if (live.resp.ok && live.data) {
+        data = SiteConfig.mergeLiveMatchupHeader(data, live.data, LEAGUE);
       }
     }
     if (!resp.ok) throw new Error(data.detail || "載入失敗");

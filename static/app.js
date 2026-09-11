@@ -597,6 +597,7 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
+    LineupLoader.cancelPending();
     if (teamId) {
       LineupLoader.ensureLineups(null, {
         apiPath: SiteConfig.api("/api/mlb"),

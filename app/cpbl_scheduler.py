@@ -217,6 +217,14 @@ async def refresh_matchup_header(
         data.pop("aTable", None)
         data.pop("situational", None)
 
+    if prev_snapshot and not game_changed:
+        merge_probable_pitchers_from_cache(
+            data, prev_snapshot, league="cpbl", fill_only=True
+        )
+    from app.pitcher_peer_sync import restore_pitcher_analysis_after_header_patch
+
+    restore_pitcher_analysis_after_header_patch(data, prev_snapshot)
+
     from app.cpbl_cache import (
         _count_final_starts_on_schedule,
         _load_schedule_games_for_upgrade,

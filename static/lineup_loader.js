@@ -23,6 +23,8 @@ window.LineupLoader = (function () {
       if (!count) continue;
       const sourceDate = String(sideData.sourceDate || "").slice(0, 10);
       const source = String(sideData.source || "").trim().toLowerCase();
+      // Previous = same team's last game — sourceDate is intentionally older than tonight.
+      if (source === "previous") continue;
       if (sourceDate && sourceDate !== gameDate) return false;
       if (source && source !== "confirmed" && source !== "pending" && sourceDate !== gameDate) {
         return false;
@@ -145,7 +147,9 @@ window.LineupLoader = (function () {
           syncLineup(lineups);
           return;
         }
-        if (resp.ok && lineupsPartial(lineups) && lineupMatchesContext(lineups, activeContext)) {
+        if (resp.ok && lineupsReady(lineups) && !lineupMatchesContext(lineups, activeContext)) {
+          showLineupPending(lineupPollAttempts + 1);
+        } else if (resp.ok && lineupsPartial(lineups) && lineupMatchesContext(lineups, activeContext)) {
           lastGoodLineups = lineups;
           syncLineup(lineups);
           showLineupLoading(
@@ -242,7 +246,13 @@ window.LineupLoader = (function () {
       );
     }
 
-    if (effectiveApiPath && teamId && typeof fetchWithTimeout === "function" && needsLive) {
+    const shouldPoll =
+      effectiveApiPath &&
+      teamId &&
+      typeof fetchWithTimeout === "function" &&
+      (cfg.isStatic ? needsLive : !snapshotOk || Boolean(force));
+
+    if (shouldPoll) {
       fetchLineupsWhenReady({
         apiPath: effectiveApiPath,
         teamId,
@@ -255,9 +265,15 @@ window.LineupLoader = (function () {
     }
   }
 
+  function cancelPending() {
+    lineupFetchGeneration += 1;
+    clearLineupPollTimer();
+  }
+
   return {
     ensureLineups,
     clearDisplayedLineups,
+    cancelPending,
     lineupsReady,
     showLineupLoading,
   };

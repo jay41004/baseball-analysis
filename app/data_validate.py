@@ -129,6 +129,22 @@ def audit_matchup_data(
             else:
                 warnings.append(msg)
 
+        for side_key, panel in (("away", away), ("home", home)):
+            starter = pitcher_name(panel)
+            if not starter:
+                continue
+            pa_games = ((panel.get("pitcherAnalysis") or {}).get("games") or [])
+            if not pa_games:
+                issues.append(
+                    f"{league} team {team_id}: {side_key} starter {starter!r} "
+                    f"missing pitcherAnalysis games"
+                )
+            elif len(pa_games) < 3:
+                warnings.append(
+                    f"{league} team {team_id}: {side_key} starter {starter!r} "
+                    f"thin pitcherAnalysis (n={len(pa_games)})"
+                )
+
     if mdate and mdate < today and status_l in {"scheduled", "preview", ""}:
         warnings.append(
             f"{league} team {team_id}: matchup date {mdate} is past but status={status!r}"

@@ -276,6 +276,7 @@ def lineups_trusted_for_matchup(
             "warmup",
             "",
         }:
+            # Same-team last-start reference until MLB publishes today's card.
             continue
         if source == "previous":
             return False

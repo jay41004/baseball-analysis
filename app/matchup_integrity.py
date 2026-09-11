@@ -133,6 +133,13 @@ def guard_matchup_for_api(data: dict[str, Any], league: str) -> dict[str, Any]:
     return export_matchup_for_api(data, league)
 
 
+def guard_lineups_for_api(data: dict[str, Any], league: str) -> dict[str, Any] | None:
+    """Lineup endpoint helper — same cross-game rules as matchup API."""
+    if not data:
+        return None
+    return guard_matchup_for_api(data, league).get("startingLineups")
+
+
 def repair_league_store(store: dict[str, Any], *, league: str, key_prefix: str) -> int:
     """Scan in-memory cache on boot; strip stale lineups. Returns entries fixed."""
     fixed = 0

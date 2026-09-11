@@ -157,10 +157,17 @@ def _apply_live_npb_header(
             }
         changed = True
 
+    if game_changed:
+        from app.matchup_integrity import blank_lineups_for_matchup
+
+        data["startingLineups"] = blank_lineups_for_matchup(data, "npb")
     if prev_snapshot:
         merge_probable_pitchers_from_cache(
             data, prev_snapshot, league="npb", fill_only=True
         )
+    from app.pitcher_peer_sync import restore_pitcher_analysis_after_header_patch
+
+    restore_pitcher_analysis_after_header_patch(data, prev_snapshot)
     return changed
 
 
@@ -200,6 +207,18 @@ async def patch_npb_header_from_live(
         games=games,
         prev_snapshot=prev_snapshot,
     )
+    from app.pitcher_peer_sync import backfill_pitcher_analysis_from_pages, pitcher_name
+
+    needs_pitcher_rows = any(
+        pitcher_name(data.get(side))
+        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
+        for side in ("away", "home")
+    )
+    if needs_pitcher_rows and await backfill_pitcher_analysis_from_pages(
+        data, league="npb", team_id=team_id, games=games
+    ):
+        changed = True
+
     if not changed:
         return cached
 

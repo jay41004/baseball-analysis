@@ -28,8 +28,10 @@ def _matchup_tuple(path: Path) -> tuple[str, int, int]:
         panel = data.get(side) or {}
         if panel.get("probablePitcher"):
             richness += 2
-        if panel.get("pitcherAnalysis"):
+        pa = panel.get("pitcherAnalysis") or {}
+        if pa:
             richness += 4
+            richness += min(len(pa.get("games") or []), 10)
         richness += min(len(panel.get("games") or []), 10)
         lineups = panel.get("lineups") or data.get("lineups") or {}
         batters = (lineups.get(side) or {}).get("batters") or []

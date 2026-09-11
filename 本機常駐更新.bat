@@ -27,6 +27,11 @@ echo [%date% %time%] 開始完整更新...
 set CLOUD_LITE=0
 set REFRESH_CONCURRENCY=2
 python scripts/refresh_static_site.py
+python scripts/audit_and_repair_data.py --data-dir docs\data --repair --fail-on-critical
+python scripts\smoke_lineup_policy.py --data-dir docs\data --local-base http://127.0.0.1:8000 --out data\local_smoke.json
+if errorlevel 1 (
+  echo [警告] 自動檢查發現問題，請看 data\local_smoke.json
+)
 echo [%date% %time%] 更新結束，3 小時後再跑
 ping 127.0.0.1 -n 10800 >nul
 goto loop

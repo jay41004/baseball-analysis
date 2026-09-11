@@ -5,8 +5,8 @@ name: Refresh data and deploy GitHub Pages
 
 on:
   schedule:
-    # Every 2 hours (UTC). Taiwan ≈ UTC+8 → even hours local.
-    - cron: "15 */2 * * *"
+    # Every hour (UTC). Taiwan ≈ UTC+8 → hourly local check + redeploy.
+    - cron: "15 * * * *"
     # NPB afternoon TW 10:00–16:00 ≈ UTC 02:00–08:00 — hourly pitcher refresh
     - cron: "10 2-8 * * *"
     # Evening TW 16:00–24:00 ≈ UTC 08:00–16:00 — hourly lineup refresh
@@ -62,6 +62,9 @@ jobs:
 
       - name: Audit exported data (fail on wrong game / absurd avgs / thin panels)
         run: python scripts/audit_and_repair_data.py --data-dir docs/data --repair --fail-on-critical
+
+      - name: Lineup policy regression smoke (unit tests)
+        run: python scripts/smoke_lineup_policy.py --data-dir docs/data --fail-on-static-gaps --out docs/data/smoke_lineup.json
 
       # Force a re-run path marker so push of audit fixes re-triggers this workflow.
       # (workflow only auto-runs on changes to this file or schedule/manual.)

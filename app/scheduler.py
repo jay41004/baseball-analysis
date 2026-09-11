@@ -182,6 +182,9 @@ async def refresh_matchup_header(
         merge_probable_pitchers_from_cache(
             data, prev_snapshot, league="mlb", fill_only=True
         )
+    from app.pitcher_peer_sync import restore_pitcher_analysis_after_header_patch
+
+    restore_pitcher_analysis_after_header_patch(data, prev_snapshot)
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
     needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
         _name(data.get(side))

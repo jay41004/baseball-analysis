@@ -142,6 +142,76 @@ window.SiteConfig = (function () {
       return false;
     },
     appendPickQuery,
+    /**
+     * GitHub Pages: merge Render live header into static snapshot — never replace
+     * team panels, pitcherAnalysis.games, or aTable wholesale.
+     */
+    mergeLiveMatchupHeader(staticData, liveData, league) {
+      if (!staticData) return liveData || null;
+      if (!liveData) return staticData;
+      const out = JSON.parse(JSON.stringify(staticData));
+      const sm = staticData.matchup || {};
+      const lm = liveData.matchup || {};
+      out.matchup = { ...sm, ...lm };
+      for (const key of ["taiwanDate", "officialDate", "timeTaiwan", "timeLocal", "gamePk", "gameSno"]) {
+        if (!out.matchup[key] && sm[key]) out.matchup[key] = sm[key];
+      }
+
+      const pitcherName = (panel) =>
+        String((panel?.probablePitcher?.fullName || panel?.pitcherAnalysis?.pitcherName || "")).trim();
+
+      for (const side of ["away", "home"]) {
+        const sp = staticData[side] || {};
+        const lp = liveData[side] || {};
+        const panel = { ...sp };
+        if (lp.teamId != null) panel.teamId = lp.teamId;
+        if (lp.teamName) panel.teamName = lp.teamName;
+
+        const oldPitcher = pitcherName(sp);
+        const newPitcher = pitcherName(lp);
+        if (lp.probablePitcher) {
+          panel.probablePitcher = lp.probablePitcher;
+        }
+
+        const staticGames = sp.pitcherAnalysis?.games || [];
+        const liveGames = lp.pitcherAnalysis?.games || [];
+        if (newPitcher && oldPitcher && newPitcher !== oldPitcher) {
+          panel.pitcherAnalysis = liveGames.length ? lp.pitcherAnalysis : undefined;
+        } else if (staticGames.length) {
+          panel.pitcherAnalysis = sp.pitcherAnalysis;
+        } else if (liveGames.length) {
+          panel.pitcherAnalysis = lp.pitcherAnalysis;
+        }
+
+        if (!(panel.games || []).length && (lp.games || []).length) {
+          panel.games = lp.games;
+        }
+        if (!panel.summary && lp.summary) {
+          panel.summary = lp.summary;
+        }
+        out[side] = panel;
+      }
+
+      const staticLineups = staticData.startingLineups;
+      const liveLineups = liveData.startingLineups;
+      if (
+        liveLineups &&
+        this.lineupsNeedLiveRefresh(staticLineups, out.matchup) &&
+        ((liveLineups.away?.batters?.length ?? 0) >= 7 ||
+          (liveLineups.home?.batters?.length ?? 0) >= 7)
+      ) {
+        out.startingLineups = liveLineups;
+      } else if (staticLineups) {
+        out.startingLineups = staticLineups;
+      }
+
+      if (!out.aTable && liveData.aTable) out.aTable = liveData.aTable;
+      if (!out.situational && liveData.situational) out.situational = liveData.situational;
+      if (staticData.cacheVersion) out.cacheVersion = staticData.cacheVersion;
+      out.liveHeaderMerged = true;
+      out.liveHeaderLeague = league || "";
+      return out;
+    },
   };
 })();
 

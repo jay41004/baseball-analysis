@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from app.matchup_integrity import (
+    guard_lineups_for_api,
     guard_matchup_for_api,
     lineups_trusted_for_league,
     sanitize_matchup_for_store,
@@ -14,6 +15,7 @@ from app.mlb_service import LINEUP_LOGIC_VERSION
 from app.pitcher_peer_sync import (
     merge_probable_pitchers_from_cache,
     patch_probable_pitcher_header,
+    restore_pitcher_analysis_after_header_patch,
 )
 
 
@@ -127,6 +129,32 @@ class MatchupIntegrityTests(unittest.TestCase):
         self.assertEqual(sit["awayTeamAwayGames"]["gameCount"], 1)
         self.assertEqual(sit["homeTeamHomeGames"]["gameCount"], 1)
 
+    def test_guard_lineups_for_api_clears_wrong_game_card(self) -> None:
+        payload = {
+            "matchup": {"date": "2026-09-10", "status": "Scheduled"},
+            "away": {"teamName": "阪神"},
+            "home": {"teamName": "巨人"},
+            "startingLineups": {
+                "away": {
+                    "teamName": "西武",
+                    "source": "confirmed",
+                    "sourceDate": "2026-09-08",
+                    "batters": [{"order": i} for i in range(1, 10)],
+                },
+                "home": {
+                    "teamName": "楽天",
+                    "source": "confirmed",
+                    "sourceDate": "2026-09-08",
+                    "batters": [{"order": i} for i in range(1, 10)],
+                },
+            },
+        }
+        out = guard_lineups_for_api(payload, "npb")
+        self.assertIsNotNone(out)
+        self.assertEqual(out["away"]["batters"], [])
+        self.assertEqual(out["home"]["batters"], [])
+        self.assertEqual(out["away"]["source"], "pending")
+
     def test_empty_lineups_are_not_stripped_as_untrusted(self) -> None:
         data = {
             "matchup": {"date": "2026-09-05", "status": "Scheduled"},
@@ -140,6 +168,42 @@ class MatchupIntegrityTests(unittest.TestCase):
         }
         self.assertFalse(strip_untrusted_lineups_inplace(data, "mlb"))
         self.assertEqual(data["startingLineups"]["away"]["source"], "pending")
+
+
+class PitcherAnalysisRestoreTests(unittest.TestCase):
+    def test_restore_pitcher_analysis_when_header_patch_strips_rows(self) -> None:
+        prev = {
+            "away": {
+                "probablePitcher": {"fullName": "Jack Perkins"},
+                "pitcherAnalysis": {
+                    "pitcherName": "Jack Perkins",
+                    "games": [{"order": 1, "pitchCount": 90}],
+                },
+            },
+            "home": {"probablePitcher": {"fullName": "Logan Gilbert"}},
+        }
+        data = {
+            "away": {
+                "probablePitcher": {"fullName": "Jack Perkins"},
+            },
+            "home": {
+                "probablePitcher": {"fullName": "Logan Gilbert"},
+            },
+        }
+        self.assertTrue(restore_pitcher_analysis_after_header_patch(data, prev))
+        self.assertEqual(len(data["away"]["pitcherAnalysis"]["games"]), 1)
+        self.assertNotIn("pitcherAnalysis", data["home"])
+
+    def test_restore_skips_when_starter_changed(self) -> None:
+        prev = {
+            "away": {
+                "probablePitcher": {"fullName": "Old Guy"},
+                "pitcherAnalysis": {"games": [{"pitchCount": 1}]},
+            }
+        }
+        data = {"away": {"probablePitcher": {"fullName": "New Guy"}}}
+        self.assertFalse(restore_pitcher_analysis_after_header_patch(data, prev))
+        self.assertNotIn("pitcherAnalysis", data["away"])
 
 
 class ProbablePitcherGuardTests(unittest.TestCase):

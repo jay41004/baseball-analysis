@@ -102,7 +102,7 @@ from app.scheduler import refresh_all_matchups as refresh_all_mlb_matchups
 from app.scheduler import start_cache_services
 
 from app.inning_comparison import a_table_payload_complete
-from app.matchup_integrity import blank_lineups_for_matchup
+from app.matchup_integrity import blank_lineups_for_matchup, guard_lineups_for_api
 from app.matchup_pick import ExpectedMatchup
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -426,6 +426,25 @@ def _lineups_have_card(lineups: dict | None) -> bool:
     away = len((lineups.get("away") or {}).get("batters") or [])
     home = len((lineups.get("home") or {}).get("batters") or [])
     return away >= 7 or home >= 7
+
+
+def _lineups_for_api(
+    cached: dict | None,
+    lineups: dict | None,
+    league: str,
+    *,
+    localize_fn=None,
+) -> dict | None:
+    """Never return another game's lineup card from /lineup polls."""
+    if not cached:
+        out = copy.deepcopy(lineups) if lineups else lineups
+    else:
+        data = copy.deepcopy(cached.get("data") or {})
+        data["startingLineups"] = copy.deepcopy(lineups) if lineups else lineups
+        out = guard_lineups_for_api(data, league)
+    if out and localize_fn:
+        localize_fn(out)
+    return out
 
 
 async def _wrap_cpbl_matchup(
@@ -992,7 +1011,7 @@ async def api_cpbl_lineup(
         matchup_date=((matchup_meta or {}).get("date") or "")[:10],
         matchup_status=(matchup_meta or {}).get("status"),
     ):
-        return lineups
+        return _lineups_for_api(cached, lineups, "cpbl")
 
     if not force and _lineups_have_card(lineups):
         async def _rebuild_cpbl_lineups() -> None:
@@ -1016,7 +1035,7 @@ async def api_cpbl_lineup(
                 logging.getLogger(__name__).exception("CPBL background lineup rebuild failed")
 
         _schedule(_rebuild_cpbl_lineups())
-        return lineups
+        return _lineups_for_api(cached, lineups, "cpbl")
 
     client = CpblClient()
     try:
@@ -1038,7 +1057,7 @@ async def api_cpbl_lineup(
         data["startingLineups"] = lineups
         await store_cpbl_matchup(team_id, games, data)
 
-    return lineups
+    return _lineups_for_api(cached, lineups, "cpbl")
 
 
 @app.get("/api/mlb/lineup")
@@ -1080,7 +1099,7 @@ async def api_mlb_lineup(
         matchup_date=matchup_date,
         matchup_status=matchup_status,
     ):
-        return lineups
+        return _lineups_for_api(cached, lineups, "mlb")
 
     if not force and _lineups_have_card(lineups) and trusted:
         async def _rebuild_mlb_lineups() -> None:
@@ -1111,7 +1130,7 @@ async def api_mlb_lineup(
                 logging.getLogger(__name__).exception("MLB background lineup rebuild failed")
 
         _schedule(_rebuild_mlb_lineups())
-        return lineups
+        return _lineups_for_api(cached, lineups, "mlb")
 
     async with httpx.AsyncClient(
         timeout=60.0,
@@ -1136,7 +1155,7 @@ async def api_mlb_lineup(
         data["startingLineups"] = lineups
         await store_mlb_matchup(team_id, games, data)
 
-    return lineups
+    return _lineups_for_api(cached, lineups, "mlb")
 
 
 @app.get("/api/npb/lineup")
@@ -1173,10 +1192,7 @@ async def api_npb_lineup(
         matchup_date=((matchup_meta or {}).get("date") or "")[:10],
         matchup_status=(matchup_meta or {}).get("status"),
     ):
-        if lineups:
-            lineups = copy.deepcopy(lineups)
-            localize_starting_lineups(lineups)
-        return lineups
+        return _lineups_for_api(cached, lineups, "npb", localize_fn=localize_starting_lineups)
 
     if not force and _lineups_have_card(lineups):
         async def _rebuild_npb_lineups() -> None:
@@ -1200,9 +1216,7 @@ async def api_npb_lineup(
                 logging.getLogger(__name__).exception("NPB background lineup rebuild failed")
 
         _schedule(_rebuild_npb_lineups())
-        lineups = copy.deepcopy(lineups)
-        localize_starting_lineups(lineups)
-        return lineups
+        return _lineups_for_api(cached, lineups, "npb", localize_fn=localize_starting_lineups)
 
     client = NpbClient()
     try:
@@ -1224,9 +1238,7 @@ async def api_npb_lineup(
         data["startingLineups"] = lineups
         await store_npb_matchup(team_id, games, data)
 
-    lineups = copy.deepcopy(lineups)
-    localize_starting_lineups(lineups)
-    return lineups
+    return _lineups_for_api(cached, lineups, "npb", localize_fn=localize_starting_lineups)
 
 
 @app.get("/api/cpbl/a-table")

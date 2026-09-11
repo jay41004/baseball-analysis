@@ -99,6 +99,67 @@ def merge_probable_pitchers_from_cache(
     return changed
 
 
+def restore_pitcher_analysis_after_header_patch(
+    data: dict[str, Any],
+    prev_snapshot: dict[str, Any] | None,
+) -> bool:
+    """Cloud-lite header patches must not leave starters without start rows."""
+    changed = False
+    for side in ("away", "home"):
+        panel = data.get(side) or {}
+        if (panel.get("pitcherAnalysis") or {}).get("games"):
+            continue
+        prev_panel = (prev_snapshot or {}).get(side) or {}
+        name = pitcher_name(panel).strip()
+        prev_name = pitcher_name(prev_panel).strip()
+        prev_analysis = prev_panel.get("pitcherAnalysis")
+        if not name or not isinstance(prev_analysis, dict):
+            continue
+        if prev_name and prev_name != name:
+            continue
+        games = prev_analysis.get("games") or []
+        if not games:
+            continue
+        panel["pitcherAnalysis"] = copy.deepcopy(prev_analysis)
+        data[side] = panel
+        changed = True
+    return changed
+
+
+async def backfill_pitcher_analysis_from_pages(
+    data: dict[str, Any],
+    *,
+    league: str,
+    team_id: int,
+    games: int,
+) -> bool:
+    """Copy pitcher start rows from GitHub Pages when Render lite stripped them."""
+    from app.pages_mirror import fetch_pages_matchup
+
+    pages_data = await fetch_pages_matchup(league, team_id, games)
+    if not pages_data:
+        return False
+    changed = False
+    for side in ("away", "home"):
+        panel = data.get(side) or {}
+        if (panel.get("pitcherAnalysis") or {}).get("games"):
+            continue
+        name = pitcher_name(panel).strip()
+        if not name:
+            continue
+        peer = pages_data.get(side) or {}
+        if pitcher_name(peer).strip() != name:
+            continue
+        analysis = peer.get("pitcherAnalysis")
+        peer_games = (analysis or {}).get("games") or []
+        if not peer_games:
+            continue
+        panel["pitcherAnalysis"] = copy.deepcopy(analysis)
+        data[side] = panel
+        changed = True
+    return changed
+
+
 def patch_probable_pitcher_header(
     panel: dict,
     new_pitcher: dict | None,
