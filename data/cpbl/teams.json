@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "nameZh": "中信兄弟",
+    "abbreviation": "兄弟"
+  },
+  {
+    "id": 2,
+    "nameZh": "統一獅",
+    "abbreviation": "統一"
+  },
+  {
+    "id": 3,
+    "nameZh": "樂天桃猿",
+    "abbreviation": "樂天"
+  },
+  {
+    "id": 4,
+    "nameZh": "富邦悍將",
+    "abbreviation": "富邦"
+  },
+  {
+    "id": 5,
+    "nameZh": "味全龍",
+    "abbreviation": "味全"
+  },
+  {
+    "id": 6,
+    "nameZh": "台鋼雄鷹",
+    "abbreviation": "台鋼"
+  }
+]
