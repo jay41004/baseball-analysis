@@ -119,6 +119,15 @@ def _bucket_games(games: list[dict[str, Any]], today: str, tomorrow: str) -> dic
 
 
 async def fetch_npb_slate() -> dict[str, list[dict[str, Any]]]:
+    from app.cloud_lite import is_cloud_lite
+
+    if is_cloud_lite():
+        from app.pages_mirror import fetch_pages_slate_bucket
+
+        bucket = await fetch_pages_slate_bucket("npb")
+        if bucket is not None:
+            return bucket
+
     from app.npb_service import NpbClient
 
     today, tomorrow = _today_tomorrow()
@@ -158,6 +167,15 @@ async def fetch_npb_slate() -> dict[str, list[dict[str, Any]]]:
 
 
 async def fetch_cpbl_slate() -> dict[str, list[dict[str, Any]]]:
+    from app.cloud_lite import is_cloud_lite
+
+    if is_cloud_lite():
+        from app.pages_mirror import fetch_pages_slate_bucket
+
+        bucket = await fetch_pages_slate_bucket("cpbl")
+        if bucket is not None:
+            return bucket
+
     from app.cpbl_service import CpblClient
     from app.cpbl_teams import team_zh
 
@@ -198,6 +216,15 @@ async def fetch_cpbl_slate() -> dict[str, list[dict[str, Any]]]:
 
 
 async def fetch_mlb_slate() -> dict[str, list[dict[str, Any]]]:
+    from app.cloud_lite import is_cloud_lite
+
+    if is_cloud_lite():
+        from app.pages_mirror import fetch_pages_slate_bucket
+
+        bucket = await fetch_pages_slate_bucket("mlb")
+        if bucket is not None:
+            return bucket
+
     from app.mlb_display import format_matchup_timing
     from app.mlb_service import MLB_BASE, UPCOMING_GAME_STATES
     from app.team_names import team_name_zh
@@ -290,6 +317,13 @@ def expected_from_slate_row(row: dict[str, Any]) -> "ExpectedMatchup":
     )
 
 
+def _slate_row_includes_team(row: dict[str, Any], team_id: int) -> bool:
+    return int(team_id) in {
+        int(row.get("awayTeamId") or 0),
+        int(row.get("homeTeamId") or 0),
+    }
+
+
 async def align_expected_with_slate(
     team_id: int, expected: "ExpectedMatchup | None"
 ) -> "ExpectedMatchup | None":
@@ -301,12 +335,19 @@ async def align_expected_with_slate(
     if not rows:
         return expected
 
-    if expected and expected.game_pk:
+    if expected and expected.game_pk and expected.includes_team(team_id):
         for row in rows:
             if int(row.get("gamePk") or 0) == int(expected.game_pk):
-                return expected_from_slate_row(row)
+                if _slate_row_includes_team(row, team_id):
+                    return expected_from_slate_row(row)
+                break
 
-    if expected and expected.away_id and expected.home_id:
+    if (
+        expected
+        and expected.away_id
+        and expected.home_id
+        and expected.includes_team(team_id)
+    ):
         for row in rows:
             if {int(row["awayTeamId"]), int(row["homeTeamId"])} == {
                 int(expected.away_id),

@@ -61,6 +61,12 @@ class ExpectedMatchup:
             return not self.date
         return self.matches_payload(entry.get("data") or {})
 
+    def includes_team(self, team_id: int) -> bool:
+        """True when this pick's team pair contains team_id."""
+        if not self.away_id and not self.home_id:
+            return True
+        return int(team_id) in {int(self.away_id or 0), int(self.home_id or 0)}
+
     def matches_schedule_row(self, game: dict[str, Any]) -> bool:
         if self.game_pk and game.get("gamePk") and int(game["gamePk"]) != self.game_pk:
             return False

@@ -34,14 +34,55 @@ window.LineupLoader = (function () {
   }
 
   function buildLineupContext({ league, teamId, games, matchup, pick }) {
+    const matchupDate = String(matchup?.date || matchup?.officialDate || "").slice(0, 10);
+    const pickDate = String(pick?.date || "").slice(0, 10);
     return {
       league,
       teamId: String(teamId || ""),
       games: String(games || ""),
-      gameDate: String(matchup?.date || pick?.date || "").slice(0, 10),
-      awayTeamId: String(pick?.awayTeamId || ""),
-      homeTeamId: String(pick?.homeTeamId || ""),
+      gameDate: matchupDate || pickDate,
+      awayTeamId: String(matchup?.awayTeamId || pick?.awayTeamId || ""),
+      homeTeamId: String(matchup?.homeTeamId || pick?.homeTeamId || ""),
     };
+  }
+
+  function resolvePick(pick, league, teamId) {
+    const raw =
+      pick ||
+      (window.ApiUtils?.matchupPick && league ? ApiUtils.matchupPick.load(league) : null);
+    return window.ApiUtils?.pickForTeam ? ApiUtils.pickForTeam(raw, teamId) : raw;
+  }
+
+  function hasVisibleLineupTable() {
+    const root = document.getElementById("lineup-root");
+    return Boolean(root?.querySelector(".lineup-table tbody tr"));
+  }
+
+  function canKeepShowingLineups(context) {
+    return (
+      (lineupsReady(lastGoodLineups) || lineupsPartial(lastGoodLineups)) &&
+      lineupMatchesContext(lastGoodLineups, context)
+    );
+  }
+
+  function setLineupStatusNote(message) {
+    const root = document.getElementById("lineup-root");
+    if (!root) return;
+    const section = root.querySelector(".lineup-section");
+    if (!section) return;
+    let note = section.querySelector(".lineup-status-note");
+    if (!note) {
+      note = document.createElement("p");
+      note.className = "lineup-note lineup-status-note";
+      const grid = section.querySelector(".lineup-grid");
+      if (grid) section.insertBefore(note, grid);
+      else section.appendChild(note);
+    }
+    note.textContent = message;
+  }
+
+  function clearLineupStatusNote() {
+    document.querySelector("#lineup-root .lineup-status-note")?.remove();
   }
 
   function lineupKey(league, teamId, games) {
@@ -82,7 +123,12 @@ window.LineupLoader = (function () {
       attempt > 0
         ? `（${attempt}/${MAX_LINEUP_POLLS}，持續檢查中…）`
         : "（持續檢查中…）";
-    showLineupLoading(`先發打線尚未公布${suffix}`);
+    const message = `先發打線尚未公布${suffix}`;
+    if (hasVisibleLineupTable()) {
+      setLineupStatusNote(message);
+      return;
+    }
+    showLineupLoading(message);
   }
 
   function clearLineupPollTimer() {
@@ -95,6 +141,10 @@ window.LineupLoader = (function () {
   function showLineupLoading(message = "打線載入中…（約 30～60 秒）") {
     const root = document.getElementById("lineup-root");
     if (!root) return;
+    if (hasVisibleLineupTable()) {
+      setLineupStatusNote(message);
+      return;
+    }
     root.innerHTML = `
       <details class="lineup-section card" open>
         <summary class="lineup-summary">先發打線 · 本季成績</summary>
@@ -145,10 +195,13 @@ window.LineupLoader = (function () {
         if (resp.ok && lineupsReady(lineups) && lineupMatchesContext(lineups, activeContext)) {
           lastGoodLineups = lineups;
           syncLineup(lineups);
+          clearLineupStatusNote();
           return;
         }
         if (resp.ok && lineupsReady(lineups) && !lineupMatchesContext(lineups, activeContext)) {
-          showLineupPending(lineupPollAttempts + 1);
+          if (!canKeepShowingLineups(activeContext)) {
+            showLineupPending(lineupPollAttempts + 1);
+          }
         } else if (resp.ok && lineupsPartial(lineups) && lineupMatchesContext(lineups, activeContext)) {
           lastGoodLineups = lineups;
           syncLineup(lineups);
@@ -192,9 +245,7 @@ window.LineupLoader = (function () {
       clearLineupPollTimer();
     }
 
-    const resolvedPick =
-      pick ||
-      (window.ApiUtils?.matchupPick && league ? ApiUtils.matchupPick.load(league) : null);
+    const resolvedPick = resolvePick(pick, league, teamId);
     const context = buildLineupContext({
       league,
       teamId,
@@ -221,6 +272,7 @@ window.LineupLoader = (function () {
     if (snapshotOk) {
       lastGoodLineups = lineups;
       syncLineup(lineups);
+      clearLineupStatusNote();
       if (!force && !needsLive) {
         clearLineupPollTimer();
         return;
@@ -230,13 +282,13 @@ window.LineupLoader = (function () {
     } else if (lineupsPartial(lineups)) {
       lastGoodLineups = lineups;
       syncLineup(lineups);
-      showLineupLoading("已載入部分打線，等待另一隊先發公布…");
+      setLineupStatusNote("已載入部分打線，等待另一隊先發公布…");
     } else if (lineupsPartial(lastGoodLineups)) {
       syncLineup(lastGoodLineups);
-      showLineupLoading("已載入部分打線，等待另一隊先發公布…");
+      setLineupStatusNote("已載入部分打線，等待另一隊先發公布…");
     } else if (lineupsPending(lineups)) {
-      showLineupPending();
-    } else {
+      if (!canKeepShowingLineups(context)) showLineupPending();
+    } else if (!canKeepShowingLineups(context)) {
       showLineupLoading(
         useLiveOnStatic
           ? "正在向雲端抓取最新先發打線…（約 30～90 秒）"

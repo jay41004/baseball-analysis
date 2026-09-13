@@ -545,7 +545,10 @@ async def lifespan(app: FastAPI):
                 await start_cache_services(skip_load=True)
                 await start_npb_cache_services(skip_load=True)
                 await start_cpbl_cache_services(skip_load=True)
-                logger.info("CLOUD_LITE boot complete")
+                from app.pages_mirror import warm_pages_mirror_background
+
+                warm_stats = await warm_pages_mirror_background()
+                logger.info("CLOUD_LITE boot complete (pages warm %s)", warm_stats)
                 return
             await asyncio.to_thread(load_mlb_disk)
             await asyncio.sleep(1)
@@ -589,20 +592,23 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Background cache boot failed")
 
-    boot_task = asyncio.create_task(_boot_cache_services())
     keepalive_task = None
-    if not is_cloud_lite():
+    if is_cloud_lite():
+        await _boot_cache_services()
+    else:
+        boot_task = asyncio.create_task(_boot_cache_services())
         keepalive_task = asyncio.create_task(cloud_keepalive_loop())
     try:
         yield
     finally:
-        boot_task.cancel()
-        if keepalive_task:
-            keepalive_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await boot_task
+        if not is_cloud_lite():
+            boot_task.cancel()
             if keepalive_task:
-                await keepalive_task
+                keepalive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await boot_task
+                if keepalive_task:
+                    await keepalive_task
 
 
 app = FastAPI(title="棒球前五局分析", lifespan=lifespan)
@@ -634,7 +640,18 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from app.cache import DEFAULT_GAMES, cached_team_count as mlb_cached
+    from app.cpbl_cache import cached_team_count as cpbl_cached
+    from app.npb_cache import cached_team_count as npb_cached
+
+    payload = {"status": "ok", "cloudLite": is_cloud_lite()}
+    if is_cloud_lite():
+        payload["teamsCached"] = {
+            "mlb": mlb_cached(DEFAULT_GAMES),
+            "npb": npb_cached(DEFAULT_GAMES),
+            "cpbl": cpbl_cached(DEFAULT_GAMES),
+        }
+    return payload
 
 
 @app.get("/api/meta")
@@ -743,25 +760,97 @@ async def _serve_mlb_picked_matchup(
     *,
     force: bool = False,
 ) -> dict:
-    """User picked a slate game: live fetch that exact gamePk, skip stale team cache."""
+    """Serve picked slate game: cache-first on Render; full rebuild only on local server."""
     from app.mlb_service import analyze_matchup
+    from app.pages_mirror import seed_matchup_from_pages
+    from app.scheduler import refresh_matchup_header as refresh_mlb_header
 
     cached = get_matchup(team_id, games)
+    if not cached:
+        await seed_matchup_from_pages(
+            "mlb", team_id, games, store=store_mlb_matchup, cache_version=MLB_CACHE_VERSION
+        )
+        cached = get_matchup(team_id, games)
+
     if (
         not force
         and cached
         and expected.game_pk
         and ((cached.get("data") or {}).get("matchup") or {}).get("gamePk")
         != expected.game_pk
+        and not is_cloud_lite()
     ):
         cached = None
-    if (
-        not force
-        and cached
-        and expected.matches_cache_entry(cached)
-        and _panels_usable((cached.get("data") or {}), games)
-    ):
-        return await _wrap_mlb_matchup(team_id, cached, refreshing=False, games=games)
+
+    panels_ok = bool(cached and _panels_usable((cached.get("data") or {}), games))
+
+    if is_cloud_lite() or (not force and panels_ok):
+        if not cached:
+            _kick_matchup_refresh_if_needed(
+                team_id=team_id,
+                games=games,
+                force=force,
+                cached=cached,
+                needs_refresh=True,
+                needs_timing_patch=False,
+                is_refreshing_fn=mlb_is_refreshing,
+                refresh_header=refresh_mlb_header,
+                full_refresh_factory=lambda: refresh_matchup(
+                    team_id, games, expected=expected
+                ),
+                expected=expected,
+            )
+            return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
+
+        needs_full_rebuild = force and not is_cloud_lite()
+        needs_refresh = (
+            (force and not is_cloud_lite())
+            or not expected.matches_cache_entry(cached)
+            or is_stale(cached["updatedAt"])
+            or _needs_full_matchup_rebuild(cached, league="mlb", games=games)
+        )
+        panels_stale = False
+        if not force:
+            from app.panel_freshness import panels_stale_for_league
+
+            panels_stale = await panels_stale_for_league(
+                "mlb", team_id, cached.get("data") or {}
+            )
+        expected_mismatch = _expected_cache_mismatch(expected, cached)
+        refreshing = await _await_matchup_refresh_if_forced(
+            team_id=team_id,
+            games=games,
+            force=force and not is_cloud_lite(),
+            needs_refresh=needs_refresh or panels_stale,
+            needs_timing_patch=_mlb_needs_timing_patch(cached),
+            is_refreshing_fn=mlb_is_refreshing,
+            refresh_header=refresh_mlb_header,
+            full_refresh_factory=lambda: refresh_matchup(
+                team_id, games, expected=expected
+            ),
+            expected=expected,
+            needs_full_rebuild=needs_full_rebuild,
+            expected_mismatch=expected_mismatch,
+            panels_stale=panels_stale,
+        )
+        if force and not is_cloud_lite():
+            cached = get_matchup(team_id, games)
+
+        if cached and expected and not expected.matches_cache_entry(cached):
+            payload = await _wrap_mlb_matchup(
+                team_id, cached, refreshing=True, games=games
+            )
+            payload["pickStale"] = True
+            return payload
+
+        if cached:
+            return await _wrap_mlb_matchup(
+                team_id, cached, refreshing=refreshing, games=games
+            )
+        return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
+
+    if is_cloud_lite():
+        return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
 
     data = await analyze_matchup(
         team_id,

@@ -1,7 +1,8 @@
 name: Deploy static UI to GitHub Pages
 
 # Fast path: update HTML/JS/CSS without waiting for a full data refresh.
-# Keeps existing docs/data from gh-pages.
+# Keeps existing docs/data from gh-pages. Shares pages-deploy concurrency
+# with refresh-pages.yml so the two never orphan-push gh-pages at once.
 
 on:
   push:
@@ -10,6 +11,8 @@ on:
       - "static/**"
       - "templates/**"
       - "scripts/build_static_site.py"
+      - "scripts/export_docs_incremental.py"
+      - "scripts/check_static_ui.py"
       - ".github/workflows/deploy-static.yml"
   workflow_dispatch:
 
@@ -17,7 +20,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: pages-static
+  group: pages-deploy
   cancel-in-progress: true
 
 jobs:
@@ -37,47 +40,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Rebuild docs UI from current templates/static + keep data
-        run: |
-          python - <<'PY'
-          import shutil
-          from pathlib import Path
-          root = Path('.')
-          prev = Path('prev_docs')
-          docs = Path('docs')
-          if docs.exists():
-              shutil.rmtree(docs)
-          docs.mkdir()
-          # Keep previously published JSON data
-          if (prev / 'data').exists():
-              shutil.copytree(prev / 'data', docs / 'data')
-          else:
-              (docs / 'data').mkdir()
-          # Copy fresh static assets
-          shutil.copytree(root / 'static', docs / 'static')
-          # Build HTML pages with SITE_STATIC inject
-          import importlib.util
-          spec = importlib.util.spec_from_file_location('build', root / 'scripts' / 'build_static_site.py')
-          mod = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(mod)
-          # Only run asset/html portion: reuse build helpers
-          # build_static_site.main() also exports from local cache which may be empty.
-          # So manually copy HTML via _fix_html/_copy_assets path.
-          from pathlib import Path as P
-          DOCS = P('docs')
-          def fix(html, depth):
-              return mod._fix_html(html, depth=depth)
-          pages = [
-              (root / 'templates' / 'index.html', DOCS / 'index.html', 0),
-              (root / 'templates' / 'npb.html', DOCS / 'npb' / 'index.html', 1),
-              (root / 'templates' / 'cpbl.html', DOCS / 'cpbl' / 'index.html', 1),
-          ]
-          for src, dst, depth in pages:
-              dst.parent.mkdir(parents=True, exist_ok=True)
-              dst.write_text(fix(src.read_text(encoding='utf-8'), depth), encoding='utf-8')
-          (DOCS / '.nojekyll').write_text('', encoding='utf-8')
-          print('UI rebuilt; data teams', len(list((DOCS/'data').rglob('*.json'))))
-          PY
+      - name: Verify source static UI before build
+        run: python scripts/check_static_ui.py --root .
+
+      - name: Rebuild docs UI (keep published data/)
+        run: python scripts/export_docs_incremental.py --ui-only --keep-data prev_docs/data
+
+      - name: Verify built docs UI
+        run: python scripts/check_static_ui.py --root docs
 
       - name: Verify UI markers
         run: |
@@ -86,9 +56,7 @@ jobs:
           grep -q 'app.js?v=' docs/index.html
           grep -q 'npb.js?v=' docs/npb/index.html
           grep -q 'cpbl.js?v=' docs/cpbl/index.html
-          grep -q 'touch-action: pan-x pan-y' docs/static/style.css
-          grep -q 'games-table' docs/static/app.js
-          grep -q 'th-short' docs/static/cpbl.js
+          grep -q 'fetchStaticMatchupWithLiveHeader' docs/static/api_utils.js
 
       - name: Deploy docs/ to gh-pages
         uses: peaceiris/actions-gh-pages@v4

@@ -21,7 +21,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: pages-refresh
+  group: pages-deploy
   # Allow a new run to cancel a stuck/hung refresh so the site can recover.
   cancel-in-progress: true
 
@@ -71,6 +71,9 @@ jobs:
 
       - name: Keep previous league data if new build is thinner
         run: python scripts/merge_keep_best.py prev_docs docs
+
+      - name: Verify static UI bundle (merge guards, no wholesale live replace)
+        run: python scripts/check_static_ui.py --root docs
 
       - name: Verify static site
         run: |

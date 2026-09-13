@@ -84,6 +84,16 @@ async def refresh_matchup_header(
 
     import httpx
 
+    from app.cloud_lite import is_cloud_lite
+
+    if is_cloud_lite():
+        from app.pages_mirror import seed_matchup_from_pages
+
+        await seed_matchup_from_pages(
+            "mlb", team_id, games, store=store_matchup, cache_version=CACHE_VERSION
+        )
+        return
+
     from app.mlb_service import (
         apply_mlb_playsport_probable_pitchers,
         fetch_matchup_starting_lineups,
@@ -415,10 +425,26 @@ async def start_cache_services(*, skip_load: bool = False) -> None:
     )
     from app.cloud_lite import is_cloud_lite
 
-    if not is_cloud_lite():
-        asyncio.create_task(hourly_refresh_loop())
-        asyncio.create_task(mlb_live_header_sync_loop())
-        asyncio.create_task(_startup_data_validation_loop())
+    if is_cloud_lite():
+        asyncio.create_task(_cloud_lite_pages_sync_loop())
+        return
+
+    asyncio.create_task(hourly_refresh_loop())
+    asyncio.create_task(mlb_live_header_sync_loop())
+    asyncio.create_task(_startup_data_validation_loop())
+
+
+async def _cloud_lite_pages_sync_loop() -> None:
+    """Re-sync all teams from GitHub Pages so Render always serves warm cache."""
+    from app.pages_mirror import warm_pages_mirror_background
+
+    await asyncio.sleep(120)
+    while True:
+        try:
+            await warm_pages_mirror_background()
+        except Exception:
+            logger.exception("Cloud-lite Pages sync failed")
+        await asyncio.sleep(int(os.environ.get("CLOUD_LITE_SYNC_SECONDS", "1800")))
 
 
 async def _startup_data_validation_loop() -> None:

@@ -91,11 +91,21 @@ window.GamePicker = (function () {
     };
   }
 
-  function resolvePickFromSlate(pick, allGames, league) {
+  function resolvePickFromSlate(pick, allGames, league, teamId) {
     if (!pick || !allGames.length) return null;
+    if (teamId && ApiUtils.pickIncludesTeam && !ApiUtils.pickIncludesTeam(pick, teamId)) {
+      ApiUtils.matchupPick.clear(league);
+      return null;
+    }
     if (pick.gamePk) {
       const byPk = allGames.find((r) => Number(r.gamePk) === Number(pick.gamePk));
-      if (byPk) return byPk;
+      if (byPk) {
+        if (teamId && !isSelected(byPk, teamId)) {
+          ApiUtils.matchupPick.clear(league);
+          return null;
+        }
+        return byPk;
+      }
     }
     const pd = String(pick.date || "").slice(0, 10);
     const byTeams = allGames.find(
@@ -155,7 +165,7 @@ window.GamePicker = (function () {
       const tomorrowGames = data.tomorrowGames || leagueData.tomorrow || [];
       const allGames = [...todayGames, ...tomorrowGames];
       const savedPick = ApiUtils.matchupPick.load(league);
-      let activePick = resolvePickFromSlate(savedPick, allGames, league);
+      let activePick = resolvePickFromSlate(savedPick, allGames, league, teamSelect.value);
       if (activePick && activePick !== savedPick) {
         ApiUtils.matchupPick.save(league, activePick);
       }

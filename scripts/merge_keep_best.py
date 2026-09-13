@@ -52,31 +52,17 @@ def _merge_league_files(prev_dir: Path, new_dir: Path) -> None:
             shutil.copy2(prev_file, new_file)
 
 
-def _copy_league(src: Path, dst: Path) -> None:
-    if not src.is_dir():
-        return
-    dst.mkdir(parents=True, exist_ok=True)
-    for path in src.iterdir():
-        target = dst / path.name
-        if path.is_file():
-            shutil.copy2(path, target)
-
-
 def merge(prev_root: Path, new_root: Path) -> None:
     prev_data = prev_root / "data"
     new_data = new_root / "data"
     if not new_data.is_dir():
         raise SystemExit(f"missing new data dir: {new_data}")
 
-    for league, min_keep in (("mlb", 20), ("npb", 8), ("cpbl", 4)):
+    for league in ("mlb", "npb", "cpbl"):
         prev_n = _count_matchups(prev_data / league)
         new_n = _count_matchups(new_data / league)
-        if prev_n > new_n and prev_n >= min_keep:
-            print(f"KEEP previous {league}: new={new_n} prev={prev_n}")
-            _copy_league(prev_data / league, new_data / league)
-        else:
-            print(f"USE new {league}: new={new_n} prev={prev_n}")
-            _merge_league_files(prev_data / league, new_data / league)
+        print(f"merge {league}: new={new_n} prev={prev_n}")
+        _merge_league_files(prev_data / league, new_data / league)
 
     # Refresh meta counts from whatever we kept.
     meta_path = new_data / "meta.json"

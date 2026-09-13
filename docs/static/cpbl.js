@@ -567,7 +567,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
-    if (teamId) {
+    LineupLoader.cancelPending();
+    if (teamId && (!hasDisplayedData || isTeamSwitch)) {
       LineupLoader.ensureLineups(null, {
         apiPath: SiteConfig.api("/api/cpbl"),
         league: "cpbl",
@@ -591,21 +592,35 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       cacheStatusEl.textContent = "靜態資料隨部署更新；正在向雲端抓取最新先發打線…";
     }
 
-    const pick = ApiUtils.matchupPick.load(LEAGUE);
-    const { resp, data } = await ApiUtils.fetchMatchupForPick({
-      buildUrl: (tid, g, f, p) => SiteConfig.cpblMatchup(tid, g, f, p),
-      teamId,
-      games,
-      force: force && !SiteConfig.isStatic,
-      pick,
-      league: LEAGUE,
-      fetchFn: fetchWithTimeout,
-      fetchJsonOpts: {
-        onWaiting(n, total) {
-          cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
-        },
+    const pick = ApiUtils.pickForTeam(ApiUtils.matchupPick.load(LEAGUE), teamId);
+    const fetchJsonOpts = {
+      onWaiting(n, total) {
+        cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
       },
-    });
+    };
+    const { resp, data } = SiteConfig.isStatic
+      ? await ApiUtils.fetchStaticMatchupWithLiveHeader({
+          league: LEAGUE,
+          teamId,
+          games,
+          pick,
+          staticBuildUrl: (tid, g, f, p) => SiteConfig.cpblMatchup(tid, g, f, p),
+          fetchFn: fetchWithTimeout,
+          fetchJsonOpts,
+          onLiveStart() {
+            cacheStatusEl.textContent = "快照先發可能過期，正在向雲端確認最新先發…";
+          },
+        })
+      : await ApiUtils.fetchMatchupForPick({
+          buildUrl: (tid, g, f, p) => SiteConfig.cpblMatchup(tid, g, f, p),
+          teamId,
+          games,
+          force,
+          pick,
+          league: LEAGUE,
+          fetchFn: fetchWithTimeout,
+          fetchJsonOpts,
+        });
     if (token !== fetchToken) return;
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
@@ -619,10 +634,17 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       fetchWithTimeout,
       force,
       matchup: data.matchup,
-      pick: ApiUtils.matchupPick.load(LEAGUE),
+      pick,
     });
 
     if (!force && allowAutoRetry && !isTeamSwitch && needsFreshData(data, games)) {
+      if (SiteConfig.shouldPreferBackgroundRefresh?.() && isDataReady(data)) {
+        cacheStatusEl.textContent = "已顯示快取，背景更新中…";
+        fetchInFlight = false;
+        setBusy(false);
+        schedulePoll(true);
+        return;
+      }
       cacheStatusEl.textContent = "偵測到舊資料，正在自動更新…";
       fetchInFlight = false;
       setBusy(false);

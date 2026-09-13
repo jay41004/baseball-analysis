@@ -25,5 +25,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Verify static UI bundle markers
+        run: python scripts/check_static_ui.py --root .
+
       - name: Unit tests + lineup reference policy smoke
         run: python scripts/smoke_lineup_policy.py

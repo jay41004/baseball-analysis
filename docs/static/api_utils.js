@@ -30,10 +30,20 @@ window.SiteConfig = (function () {
     q.set("expected_home", String(pick.homeTeamId));
   }
 
+  function isRenderHost() {
+    return /\.onrender\.com$/i.test(location.hostname);
+  }
+
+  function shouldPreferBackgroundRefresh() {
+    return isStatic || isRenderHost();
+  }
+
   return {
     isStatic,
     isGhPages,
     useLiveApi,
+    isRenderHost,
+    shouldPreferBackgroundRefresh,
     liveApiRoot,
     apiRoot,
     base,
@@ -60,10 +70,25 @@ window.SiteConfig = (function () {
       return api(`/api/npb/matchup?${q}`);
     },
     npbMatchupLive(teamId, games, force, pick) {
+      return this.liveMatchupUrl("npb", teamId, games, force, pick);
+    },
+    mlbMatchupLive(teamId, games, force, pick) {
+      return this.liveMatchupUrl("mlb", teamId, games, force, pick);
+    },
+    cpblMatchupLive(teamId, games, force, pick) {
+      return this.liveMatchupUrl("cpbl", teamId, games, force, pick);
+    },
+    liveMatchupUrl(league, teamId, games, force, pick) {
       const q = new URLSearchParams({ team_id: teamId, games: String(games) });
       if (force) q.set("force", "true");
       appendPickQuery(q, pick);
-      return `${liveApiRoot}/api/npb/matchup?${q}`;
+      const paths = {
+        mlb: "/api/matchup",
+        npb: "/api/npb/matchup",
+        cpbl: "/api/cpbl/matchup",
+      };
+      const path = paths[league] || `/api/${league}/matchup`;
+      return `${liveApiRoot}${path}?${q}`;
     },
     cpblTeams() {
       return isStatic ? dataUrl("cpbl", "teams.json") : api("/api/cpbl/teams");
@@ -142,6 +167,76 @@ window.SiteConfig = (function () {
       return false;
     },
     appendPickQuery,
+    /**
+     * GitHub Pages: merge Render live header into static snapshot — never replace
+     * team panels, pitcherAnalysis.games, or aTable wholesale.
+     */
+    mergeLiveMatchupHeader(staticData, liveData, league) {
+      if (!staticData) return liveData || null;
+      if (!liveData) return staticData;
+      const out = JSON.parse(JSON.stringify(staticData));
+      const sm = staticData.matchup || {};
+      const lm = liveData.matchup || {};
+      out.matchup = { ...sm, ...lm };
+      for (const key of ["taiwanDate", "officialDate", "timeTaiwan", "timeLocal", "gamePk", "gameSno"]) {
+        if (!out.matchup[key] && sm[key]) out.matchup[key] = sm[key];
+      }
+
+      const pitcherName = (panel) =>
+        String((panel?.probablePitcher?.fullName || panel?.pitcherAnalysis?.pitcherName || "")).trim();
+
+      for (const side of ["away", "home"]) {
+        const sp = staticData[side] || {};
+        const lp = liveData[side] || {};
+        const panel = { ...sp };
+        if (lp.teamId != null) panel.teamId = lp.teamId;
+        if (lp.teamName) panel.teamName = lp.teamName;
+
+        const oldPitcher = pitcherName(sp);
+        const newPitcher = pitcherName(lp);
+        if (lp.probablePitcher) {
+          panel.probablePitcher = lp.probablePitcher;
+        }
+
+        const staticGames = sp.pitcherAnalysis?.games || [];
+        const liveGames = lp.pitcherAnalysis?.games || [];
+        if (newPitcher && oldPitcher && newPitcher !== oldPitcher) {
+          panel.pitcherAnalysis = liveGames.length ? lp.pitcherAnalysis : undefined;
+        } else if (staticGames.length) {
+          panel.pitcherAnalysis = sp.pitcherAnalysis;
+        } else if (liveGames.length) {
+          panel.pitcherAnalysis = lp.pitcherAnalysis;
+        }
+
+        if (!(panel.games || []).length && (lp.games || []).length) {
+          panel.games = lp.games;
+        }
+        if (!panel.summary && lp.summary) {
+          panel.summary = lp.summary;
+        }
+        out[side] = panel;
+      }
+
+      const staticLineups = staticData.startingLineups;
+      const liveLineups = liveData.startingLineups;
+      if (
+        liveLineups &&
+        this.lineupsNeedLiveRefresh(staticLineups, out.matchup) &&
+        ((liveLineups.away?.batters?.length ?? 0) >= 7 ||
+          (liveLineups.home?.batters?.length ?? 0) >= 7)
+      ) {
+        out.startingLineups = liveLineups;
+      } else if (staticLineups) {
+        out.startingLineups = staticLineups;
+      }
+
+      if (!out.aTable && liveData.aTable) out.aTable = liveData.aTable;
+      if (!out.situational && liveData.situational) out.situational = liveData.situational;
+      if (staticData.cacheVersion) out.cacheVersion = staticData.cacheVersion;
+      out.liveHeaderMerged = true;
+      out.liveHeaderLeague = league || "";
+      return out;
+    },
   };
 })();
 
@@ -216,10 +311,11 @@ window.ApiUtils = (function () {
   }
 
   function isMatchupDataReady(data) {
-    if (!data || data.loading) return false;
+    if (!data) return false;
     const hasGames =
       (data.away?.games?.length ?? 0) > 0 && (data.home?.games?.length ?? 0) > 0;
     if (hasGames) return true;
+    if (data.loading) return false;
     return matchupHasHeader(data);
   }
 
@@ -262,6 +358,16 @@ window.ApiUtils = (function () {
     },
   };
 
+  function pickIncludesTeam(pick, teamId) {
+    if (!pick || teamId == null || teamId === "") return false;
+    const tid = String(teamId);
+    return tid === String(pick.awayTeamId) || tid === String(pick.homeTeamId);
+  }
+
+  function pickForTeam(pick, teamId) {
+    return pickIncludesTeam(pick, teamId) ? pick : null;
+  }
+
   function matchupMatchesPick(data, pick) {
     if (!pick || !data) return true;
     const pk = pick.gamePk ? Number(pick.gamePk) : null;
@@ -289,19 +395,81 @@ window.ApiUtils = (function () {
     fetchFn,
     fetchJsonOpts = {},
   }) {
-    const load = async (tid, f, activePick = pick) =>
-      fetchJson(buildUrl(tid, games, f, activePick), fetchFn, fetchJsonOpts);
+    const activePick = pickForTeam(pick, teamId);
+    const load = async (tid, f, reqPick = activePick) =>
+      fetchJson(buildUrl(tid, games, f, reqPick), fetchFn, fetchJsonOpts);
     let primary = await load(teamId, force);
-    if (primary.data?.pickStale && pick && league && !force) {
-      primary = await load(teamId, true, pick);
+    if (
+      !primary.resp.ok &&
+      pick &&
+      league &&
+      !pickIncludesTeam(pick, teamId) &&
+      !force
+    ) {
+      matchupPick.clear(league);
+      primary = await load(teamId, force, null);
     }
-    if (!pick || matchupMatchesPick(primary.data, pick)) return primary;
+    if (primary.data?.pickStale && activePick && league && !force) {
+      primary = await load(teamId, true, activePick);
+    }
+    if (!activePick || matchupMatchesPick(primary.data, activePick)) return primary;
     const other =
-      String(teamId) === String(pick.awayTeamId) ? pick.homeTeamId : pick.awayTeamId;
+      String(teamId) === String(activePick.awayTeamId)
+        ? activePick.homeTeamId
+        : activePick.awayTeamId;
     const alt = await load(other, force);
-    if (matchupMatchesPick(alt.data, pick)) return alt;
+    if (matchupMatchesPick(alt.data, activePick)) return alt;
     if (!force && !SiteConfig.isStatic) return load(teamId, true);
     return primary;
+  }
+
+  /**
+   * GitHub Pages: load static JSON, then merge Render live header/lineups only
+   * (never replace pitcherAnalysis.games or team panels wholesale).
+   */
+  async function fetchStaticMatchupWithLiveHeader({
+    league,
+    teamId,
+    games,
+    pick,
+    staticBuildUrl,
+    fetchFn,
+    fetchJsonOpts = {},
+    onLiveStart,
+  }) {
+    const result = await fetchMatchupForPick({
+      buildUrl: staticBuildUrl,
+      teamId,
+      games,
+      force: false,
+      pick,
+      league,
+      fetchFn,
+      fetchJsonOpts,
+    });
+    if (
+      !SiteConfig.isStatic ||
+      !result.resp.ok ||
+      !result.data ||
+      !SiteConfig.matchupNeedsLiveRefresh(league, result.data, pick)
+    ) {
+      return result;
+    }
+    if (onLiveStart) onLiveStart();
+    const live = await fetchMatchupForPick({
+      buildUrl: (tid, g, _f, p) => SiteConfig.liveMatchupUrl(league, tid, g, true, p),
+      teamId,
+      games,
+      force: true,
+      pick,
+      league,
+      fetchFn,
+      fetchJsonOpts,
+    });
+    if (live.resp.ok && live.data) {
+      result.data = SiteConfig.mergeLiveMatchupHeader(result.data, live.data, league);
+    }
+    return result;
   }
 
   return {
@@ -311,8 +479,11 @@ window.ApiUtils = (function () {
     isMatchupDataReady,
     matchupHasHeader,
     matchupPick,
+    pickIncludesTeam,
+    pickForTeam,
     matchupMatchesPick,
     fetchMatchupForPick,
+    fetchStaticMatchupWithLiveHeader,
   };
 })();
 

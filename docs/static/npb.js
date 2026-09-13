@@ -92,7 +92,7 @@ function updateCacheStatus(data) {
     text += " · 請按「立即更新」或 Ctrl+F5";
   }
   if (SiteConfig.isStatic && data.matchup) {
-    const pick = ApiUtils.matchupPick.load(LEAGUE);
+    const pick = ApiUtils.pickForTeam(ApiUtils.matchupPick.load(LEAGUE), teamSelect.value);
     if (SiteConfig.matchupNeedsLiveRefresh(LEAGUE, data, pick)) {
       text += " · 快照先發可能過期，已嘗試向雲端確認";
     }
@@ -577,7 +577,8 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
     pollAttempts = 0;
     clearPollTimer();
     cancelATableLoad();
-    if (teamId && !SiteConfig.isStatic) {
+    LineupLoader.cancelPending();
+    if (teamId && !SiteConfig.isStatic && (!hasDisplayedData || isTeamSwitch)) {
       LineupLoader.showLineupLoading("打線載入中…");
     }
     if (!hasDisplayedData) {
@@ -593,41 +594,36 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       cacheStatusEl.textContent = "靜態資料隨部署更新；正在向雲端抓取最新先發打線…";
     }
 
-    const pick = ApiUtils.matchupPick.load(LEAGUE);
-    const fetchOpts = {
-      teamId,
-      games,
-      force: force && !SiteConfig.isStatic,
-      pick,
-      league: LEAGUE,
-      fetchFn: fetchWithTimeout,
-      fetchJsonOpts: {
-        onWaiting(n, total) {
-          cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
-        },
+    const pick = ApiUtils.pickForTeam(ApiUtils.matchupPick.load(LEAGUE), teamId);
+    const fetchJsonOpts = {
+      onWaiting(n, total) {
+        cacheStatusEl.textContent = `雲端啟動中…（${n}/${total}，約 30～60 秒）`;
       },
     };
-    let { resp, data } = await ApiUtils.fetchMatchupForPick({
-      ...fetchOpts,
-      buildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, false),
-    });
+    let { resp, data } = SiteConfig.isStatic
+      ? await ApiUtils.fetchStaticMatchupWithLiveHeader({
+          league: LEAGUE,
+          teamId,
+          games,
+          pick,
+          staticBuildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, false),
+          fetchFn: fetchWithTimeout,
+          fetchJsonOpts,
+          onLiveStart() {
+            cacheStatusEl.textContent = "快照先發可能過期，正在向雲端確認最新先發…";
+          },
+        })
+      : await ApiUtils.fetchMatchupForPick({
+          buildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, false),
+          teamId,
+          games,
+          force,
+          pick,
+          league: LEAGUE,
+          fetchFn: fetchWithTimeout,
+          fetchJsonOpts,
+        });
     if (token !== fetchToken) return;
-    if (
-      SiteConfig.isStatic &&
-      resp.ok &&
-      SiteConfig.matchupNeedsLiveRefresh(LEAGUE, data, pick)
-    ) {
-      cacheStatusEl.textContent = "快照先發可能過期，正在向雲端確認最新先發…";
-      const live = await ApiUtils.fetchMatchupForPick({
-        ...fetchOpts,
-        buildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, true),
-      });
-      if (token !== fetchToken) return;
-      if (live.resp.ok) {
-        resp = live.resp;
-        data = live.data;
-      }
-    }
     if (!resp.ok) throw new Error(data.detail || "載入失敗");
 
     renderMatchup(data, { skipIfUnchanged: isPoll });
@@ -640,10 +636,17 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
       fetchWithTimeout,
       force,
       matchup: data.matchup,
-      pick: ApiUtils.matchupPick.load(LEAGUE),
+      pick,
     });
 
     if (!force && allowAutoRetry && !isTeamSwitch && needsFreshData(data, games)) {
+      if (SiteConfig.shouldPreferBackgroundRefresh?.() && isDataReady(data)) {
+        cacheStatusEl.textContent = "已顯示快取，背景更新中…";
+        fetchInFlight = false;
+        setBusy(false);
+        schedulePoll(true);
+        return;
+      }
       cacheStatusEl.textContent = "偵測到舊資料，正在自動更新…";
       fetchInFlight = false;
       setBusy(false);

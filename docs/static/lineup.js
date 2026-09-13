@@ -141,6 +141,14 @@ function renderLineupBlock(side, roleLabel) {
   `;
 }
 
+function lineupPendingBanner(lineups) {
+  const sides = [lineups?.away, lineups?.home].filter(Boolean);
+  const hasConfirmed = sides.some((s) => s.source === "confirmed" && (s.batters?.length ?? 0) >= 7);
+  const hasReference = sides.some((s) => s.source === "previous" && (s.batters?.length ?? 0) >= 7);
+  if (hasConfirmed || !hasReference) return "";
+  return `<p class="lineup-note lineup-pending-banner">⚠ 官網尚未公布本場先發打線，以下為各隊<strong>上一場先發打序參考</strong>（非今晚確定名單）。公布後會自動更新。</p>`;
+}
+
 function renderLineupSection(lineups) {
   const awayBlock = renderLineupBlock(lineups?.away, "客隊");
   const homeBlock = renderLineupBlock(lineups?.home, "主隊");
@@ -148,6 +156,7 @@ function renderLineupSection(lineups) {
   return `
     <details class="lineup-section card" open>
       <summary class="lineup-summary">先發打線 · 本季成績</summary>
+      ${lineupPendingBanner(lineups)}
       <p class="lineup-note">若本場尚未公布先發，顯示該隊上一場比賽的先發打序。打點／打擊率／上壘率／得點圈／全壘打：MLB、NPB 皆為本季（NPB 得點圈取自整季統計）；對投手成績為對本場先發投手（有公布先發時）；近3安打 = 近3場有安打的場數。</p>
       <div class="lineup-grid">
         ${awayBlock}

@@ -110,7 +110,40 @@ def write_meta() -> None:
     )
 
 
+def ui_only(keep_data: Path | None = None) -> None:
+    """Rebuild HTML/JS from static/ without touching local cache exports."""
+    DOCS.mkdir(parents=True, exist_ok=True)
+    if keep_data and keep_data.is_dir():
+        if DATA.exists():
+            shutil.rmtree(DATA)
+        shutil.copytree(keep_data, DATA)
+    elif not DATA.exists():
+        DATA.mkdir(parents=True, exist_ok=True)
+    sync_assets()
+    (DOCS / ".nojekyll").write_text("", encoding="utf-8")
+    print(f"UI only: {DOCS} (data files: {len(list(DATA.rglob('*.json')))})")
+
+
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Export docs/ for GitHub Pages")
+    parser.add_argument(
+        "--ui-only",
+        action="store_true",
+        help="Only sync static/ + HTML; optionally keep existing data/",
+    )
+    parser.add_argument(
+        "--keep-data",
+        type=Path,
+        default=None,
+        help="Directory to copy into docs/data (used with --ui-only)",
+    )
+    args = parser.parse_args()
+    if args.ui_only:
+        ui_only(args.keep_data)
+        return
+
     sync_assets()
     export_league("app.cache", "mlb")
     export_league("app.npb_cache", "npb")
