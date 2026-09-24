@@ -69,6 +69,7 @@ async def test_align_expected_uses_team_game_not_stale_pick(
         return {"today": rows, "tomorrow": []}
 
     monkeypatch.setattr("app.slate_service.fetch_mlb_slate", fake_slate)
+    monkeypatch.setattr("app.slate_service._today_tomorrow", lambda: ("2026-09-12", "2026-09-13"))
     aligned = await align_expected_with_slate(team_id, expected)
     assert aligned is not None
     assert aligned.game_pk == want_pk
@@ -79,3 +80,38 @@ def test_expected_includes_team():
     assert pick.includes_team(158)
     assert pick.includes_team(113)
     assert not pick.includes_team(143)
+
+
+@pytest.mark.asyncio
+async def test_align_drops_stale_pages_pick(monkeypatch):
+    async def fake_slate():
+        return {
+            "today": [
+                {
+                    "gamePk": 823092,
+                    "awayTeamId": 140,
+                    "homeTeamId": 136,
+                    "date": "2026-09-09",
+                }
+            ],
+            "tomorrow": [],
+        }
+
+    async def fake_next(_team_id: int):
+        from app.matchup_pick import ExpectedMatchup
+
+        return ExpectedMatchup(
+            date="2026-09-18",
+            away_id=136,
+            home_id=115,
+            game_pk=824303,
+        )
+
+    monkeypatch.setattr("app.slate_service.fetch_mlb_slate", fake_slate)
+    monkeypatch.setattr("app.slate_service._today_tomorrow", lambda: ("2026-09-17", "2026-09-18"))
+    monkeypatch.setattr("app.slate_service.expected_from_next_mlb_game", fake_next)
+
+    stale = ExpectedMatchup(date="2026-09-09", away_id=140, home_id=136, game_pk=823092)
+    aligned = await align_expected_with_slate(136, stale)
+    assert aligned is not None
+    assert aligned.game_pk == 824303

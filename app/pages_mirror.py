@@ -34,6 +34,37 @@ _SLATE_CACHE: dict[str, tuple[float, dict[str, list[dict[str, Any]]]]] = {}
 _SLATE_TTL_S = 300.0
 
 
+def pages_slate_dates_match(payload: dict[str, Any]) -> bool:
+    """True when Pages slate today/tomorrow labels match Taiwan wall clock."""
+    from app.slate_service import _today_tomorrow
+
+    today, tomorrow = _today_tomorrow()
+    return (
+        str(payload.get("today") or "")[:10] == today
+        and str(payload.get("tomorrow") or "")[:10] == tomorrow
+    )
+
+
+def matchup_payload_stale(data: dict[str, Any] | None, *, league: str = "mlb") -> bool:
+    """True when static matchup header date is before today's column."""
+    if not data:
+        return True
+    matchup = data.get("matchup") or {}
+    md = str(
+        matchup.get("date") or matchup.get("taiwanDate") or matchup.get("officialDate") or ""
+    )[:10]
+    if not md:
+        return True
+    from datetime import datetime, timedelta, timezone
+
+    if league == "npb":
+        tz = timezone(timedelta(hours=9))
+    else:
+        tz = timezone(timedelta(hours=8))
+    today = datetime.now(tz).date().isoformat()
+    return md < today
+
+
 def cache_data_from_pages_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if key not in _WRAPPER_KEYS}
 
@@ -70,6 +101,14 @@ async def fetch_pages_slate_bucket(league: str) -> dict[str, list[dict[str, Any]
 
     payload = await fetch_pages_json(f"{league}/slate.json")
     if not payload:
+        return None
+    if not pages_slate_dates_match(payload):
+        logger.warning(
+            "Pages slate %s stale (%s / %s vs now); falling back to live slate",
+            league,
+            payload.get("today"),
+            payload.get("tomorrow"),
+        )
         return None
     bucket = {
         "today": list(payload.get("todayGames") or []),

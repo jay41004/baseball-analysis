@@ -606,11 +606,14 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
           teamId,
           games,
           pick,
+          force,
           staticBuildUrl: (tid, g, f, p) => buildNpbMatchupUrl(tid, g, f, p, false),
           fetchFn: fetchWithTimeout,
           fetchJsonOpts,
           onLiveStart() {
-            cacheStatusEl.textContent = "快照先發可能過期，正在向雲端確認最新先發…";
+            cacheStatusEl.textContent = force
+              ? "正在向雲端抓取最新對戰、先發與逐場資料…"
+              : "快照先發可能過期，正在向雲端確認最新先發…";
           },
         })
       : await ApiUtils.fetchMatchupForPick({
@@ -729,7 +732,9 @@ function beginTeamSwitch() {
   const metaEl = document.getElementById("matchup-meta");
   if (titleEl) titleEl.textContent = "載入中…";
   if (metaEl) metaEl.textContent = "";
-  matchupGridEl.innerHTML = '<p class="lineup-note switch-loading">載入中…</p>';
+  if (!hasDisplayedData) {
+    matchupGridEl.innerHTML = '<p class="lineup-note switch-loading">載入中…</p>';
+  }
 }
 
 refreshBtn.addEventListener("click", () => fetchAnalysis(true));

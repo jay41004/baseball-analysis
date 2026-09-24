@@ -634,11 +634,14 @@ async function fetchAnalysis(force = false, allowAutoRetry = true, isPoll = fals
           teamId,
           games,
           pick,
+          force,
           staticBuildUrl: (tid, g, f, p) => SiteConfig.mlbMatchup(tid, g, f, p),
           fetchFn: fetchWithTimeout,
           fetchJsonOpts,
           onLiveStart() {
-            cacheStatusEl.textContent = "快照先發可能過期，正在向雲端確認最新先發…";
+            cacheStatusEl.textContent = force
+              ? "正在向雲端抓取最新對戰、先發與逐場資料…"
+              : "快照先發可能過期，正在向雲端確認最新先發…";
           },
         })
       : await ApiUtils.fetchMatchupForPick({

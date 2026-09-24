@@ -73,12 +73,33 @@ def pitcher_analysis_incomplete(
         return True
     cached = len(games)
     pool_size = analysis.get("startPoolSize")
+    pool = analysis.get("_startPool") or []
+    if pool_size is None and pool:
+        pool_size = len(pool)
     if isinstance(pool_size, int) and pool_size > cached:
         return True
-    if expected_starts is not None and expected_starts > cached:
-        target = min(game_count, expected_starts)
-        # Only flag when we clearly expect more rows (established starter mid-season).
-        if target >= 3 and cached < target:
+    if expected_starts is None:
+        if cached < game_count:
+            return True
+        return False
+    target = min(game_count, expected_starts)
+    if target >= 3 and cached < target:
+        return True
+    return False
+
+
+def pitcher_starter_mismatch(payload: dict[str, Any]) -> bool:
+    """True when probablePitcher name no longer matches cached pitcherAnalysis."""
+    from app.pitcher_peer_sync import pitcher_name
+
+    for side in ("away", "home"):
+        panel = payload.get(side) or {}
+        starter = pitcher_name(panel).strip()
+        if not starter:
+            continue
+        analysis = panel.get("pitcherAnalysis") or {}
+        cached_name = (analysis.get("pitcherName") or "").strip()
+        if cached_name and cached_name.casefold() != starter.casefold():
             return True
     return False
 
@@ -91,6 +112,8 @@ def pitcher_analysis_needs_rebuild(
 ) -> bool:
     """True when any side's pitcher block should be recomputed from box scores."""
     if pitcher_analysis_missing_pitch_counts(payload):
+        return True
+    if pitcher_starter_mismatch(payload):
         return True
     expected = expected_starts_by_side or {}
     for side in ("away", "home"):

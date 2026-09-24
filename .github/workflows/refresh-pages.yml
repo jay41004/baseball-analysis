@@ -16,6 +16,10 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/refresh-pages.yml"
+      - "app/**"
+      - "static/**"
+      - "scripts/**"
+      - "requirements.txt"
 
 permissions:
   contents: write

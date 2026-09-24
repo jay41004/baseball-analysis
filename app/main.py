@@ -6,9 +6,10 @@ from typing import Any
 
 import asyncio
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -20,6 +21,7 @@ from app.cache import (
     get_a_table as get_mlb_a_table,
     get_matchup,
     is_stale,
+    store_a_table as store_mlb_a_table,
     store_matchup as store_mlb_matchup,
     wrap_a_table_response as wrap_mlb_a_table_response,
     wrap_matchup_response,
@@ -138,7 +140,10 @@ def _finish_cloud_refresh() -> None:
 async def _schedule_matchup_refresh(factory, *, force: bool) -> bool:
     """Schedule at most one cloud rebuild. factory() must return an awaitable."""
     if not is_cloud_lite():
-        _schedule(factory())
+        if force:
+            await factory()
+        else:
+            _schedule(factory())
         return True
 
     if _can_start_cloud_refresh():
@@ -173,11 +178,20 @@ def _needs_full_matchup_rebuild(
             return True
 
     from app.pitcher_peer_sync import probable_pitchers_missing
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+    from app.pitcher_rows import (
+        pitcher_analysis_missing_pitch_counts,
+        pitcher_starter_mismatch,
+    )
 
     if probable_pitchers_missing(data):
         return True
     if pitcher_analysis_missing_pitch_counts(data):
+        return True
+    if pitcher_starter_mismatch(data):
+        return True
+    from app.pitcher_rows import pitcher_analysis_needs_rebuild
+
+    if pitcher_analysis_needs_rebuild(data, game_count=games):
         return True
     if not ((data.get("away") or {}).get("games") or []):
         return True
@@ -361,8 +375,11 @@ async def _await_matchup_refresh_if_forced(
         expected=expected,
         needs_full_rebuild=needs_full_rebuild,
     )
-    sync = (force and not is_cloud_lite()) or (
-        expected_mismatch and expected is not None and not is_cloud_lite()
+    sync = (not is_cloud_lite()) and (
+        force
+        or expected_mismatch
+        or panels_stale
+        or needs_full_rebuild
     )
     if sync:
         await coro
@@ -393,10 +410,80 @@ def _attach_a_table(
     return payload
 
 
+async def _refresh_stale_npb_pitcher_analysis(
+    team_id: int, games: int, entry: dict
+) -> dict:
+    if is_cloud_lite():
+        return entry
+    from app.npb_cache import (
+        get_matchup as get_npb_matchup_entry,
+        store_matchup as store_npb_matchup,
+    )
+    from app.npb_service import NpbClient, rebuild_pitcher_dependent_fields
+    from app.pitcher_rows import (
+        pitcher_analysis_missing_pitch_counts,
+        pitcher_analysis_needs_rebuild,
+        pitcher_starter_mismatch,
+    )
+
+    data = entry.get("data") or {}
+    shallow_incomplete = pitcher_starter_mismatch(data) or pitcher_analysis_missing_pitch_counts(
+        data
+    )
+    if not shallow_incomplete:
+        for side in ("away", "home"):
+            panel = data.get(side) or {}
+            starter = ((panel.get("probablePitcher") or {}).get("fullName") or "").strip()
+            if not starter:
+                continue
+            cached_n = len((panel.get("pitcherAnalysis") or {}).get("games") or [])
+            if cached_n < games:
+                shallow_incomplete = True
+                break
+    if not shallow_incomplete:
+        return entry
+
+    expected_by_side: dict[str, int] = {}
+    client = NpbClient()
+    try:
+        schedule = await client.fetch_schedule()
+        from app.npb_service import count_pitcher_final_starts_on_schedule
+
+        for side in ("away", "home"):
+            panel = data.get(side) or {}
+            name = ((panel.get("probablePitcher") or {}).get("fullName") or "").strip()
+            tid = int(panel.get("teamId") or 0)
+            if name and tid:
+                expected_by_side[side] = count_pitcher_final_starts_on_schedule(
+                    schedule, tid, name
+                )
+    finally:
+        await client.close()
+    if not pitcher_analysis_needs_rebuild(
+        data, game_count=games, expected_starts_by_side=expected_by_side
+    ):
+        return entry
+    try:
+        rebuilt = await rebuild_pitcher_dependent_fields(data, game_count=games)
+        rebuilt["cacheVersion"] = NPB_CACHE_VERSION
+        await store_npb_matchup(team_id, games, rebuilt)
+        return get_npb_matchup_entry(team_id, games) or entry
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "NPB pitcher analysis refresh failed for team %s", team_id
+        )
+        return entry
+
+
 async def _wrap_npb_matchup(
     team_id: int, entry: dict, *, refreshing: bool, games: int = DEFAULT_GAMES
 ) -> dict:
-    from app.npb_cache import get_matchup as get_npb_matchup_entry, store_matchup as store_npb_matchup
+    from app.npb_cache import (
+        get_matchup as get_npb_matchup_entry,
+        store_matchup as store_npb_matchup,
+    )
     from app.npb_scheduler import ensure_npb_pitchers_fresh
     from app.pitcher_peer_sync import sync_pitchers_on_read
 
@@ -408,6 +495,7 @@ async def _wrap_npb_matchup(
         store_matchup=store_npb_matchup,
         ensure_fresh=ensure_npb_pitchers_fresh,
     )
+    entry = await _refresh_stale_npb_pitcher_analysis(team_id, games, entry)
     payload = await asyncio.to_thread(
         wrap_npb_matchup_response, entry, refreshing=refreshing
     )
@@ -494,6 +582,80 @@ def _mlb_refreshing_for_response(cached: dict | None, refreshing: bool, games: i
     return not _panels_usable(data, games)
 
 
+async def _force_refresh_mlb_cloud_lite(
+    team_id: int,
+    games: int,
+    expected: ExpectedMatchup,
+    *,
+    refresh_header,
+) -> dict | None:
+    """Render free tier: header + pitcher rows + lineups (no full panel scrape)."""
+    from app.mlb_service import rebuild_pitcher_dependent_fields
+
+    await refresh_header(team_id, games, expected=expected)
+    cached = get_matchup(team_id, games)
+    if not cached:
+        return None
+    try:
+        rebuilt = await rebuild_pitcher_dependent_fields(
+            cached.get("data") or {}, game_count=games
+        )
+        rebuilt["cacheVersion"] = MLB_CACHE_VERSION
+        await store_mlb_matchup(team_id, games, rebuilt)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "Cloud-lite force pitcher rebuild failed for team %s", team_id
+        )
+    return get_matchup(team_id, games)
+
+
+async def _refresh_stale_mlb_pitcher_analysis(
+    team_id: int, games: int, entry: dict
+) -> dict:
+    """On local server, rebuild pitcher per-start rows when cache lags new outings."""
+    if is_cloud_lite():
+        return entry
+    data = entry.get("data") or {}
+    from app.pitcher_rows import pitcher_starter_mismatch
+
+    stale = pitcher_starter_mismatch(data)
+    if not stale:
+        import httpx
+
+        from app.panel_freshness import mlb_pitcher_analysis_stale
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                stale = await mlb_pitcher_analysis_stale(client, data)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "MLB pitcher staleness check failed for team %s", team_id
+            )
+            return entry
+    if not stale:
+        return entry
+
+    from app.mlb_service import rebuild_pitcher_dependent_fields
+
+    try:
+        rebuilt = await rebuild_pitcher_dependent_fields(data, game_count=games)
+        rebuilt["cacheVersion"] = MLB_CACHE_VERSION
+        await store_mlb_matchup(team_id, games, rebuilt)
+        refreshed = get_matchup(team_id, games)
+        return refreshed or entry
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "MLB pitcher analysis refresh failed for team %s", team_id
+        )
+        return entry
+
+
 async def _wrap_mlb_matchup(
     team_id: int, entry: dict, *, refreshing: bool, games: int = DEFAULT_GAMES
 ) -> dict:
@@ -508,6 +670,8 @@ async def _wrap_mlb_matchup(
         get_matchup=get_mlb_entry,
         store_matchup=store_mlb_entry,
     )
+    entry = await _refresh_stale_mlb_pitcher_analysis(team_id, games, entry)
+    refreshing = _mlb_refreshing_for_response(entry, refreshing, games)
     payload = wrap_matchup_response(entry, refreshing=refreshing)
     payload = apply_mlb_matchup_timing(payload)
     return _attach_a_table(
@@ -630,7 +794,7 @@ app.add_middleware(
 async def disable_browser_cache_for_local_ui(request: Request, call_next):
     response = await call_next(request)
     path = request.url.path
-    if path.startswith("/static/") or path in {"/", "/npb", "/cpbl", "/slate"}:
+    if path.startswith("/static/") or path in {"/", "/npb", "/cpbl", "/slate", "/video", "/i2v", "/portrait"}:
         response.headers["Cache-Control"] = "no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -660,7 +824,7 @@ async def api_meta():
     npb_cached = npb_cached_team_count(DEFAULT_GAMES)
     cpbl_cached = cpbl_cached_team_count(DEFAULT_GAMES)
     return {
-        "deployMark": "2026-09-01-pitcher-peer-sync",
+        "deployMark": "2026-09-24-pitcher-force-sync",
         "cloudLite": is_cloud_lite(),
         "renderEnv": bool(__import__("os").environ.get("RENDER")),
         "cloudLiteEnv": __import__("os").environ.get("CLOUD_LITE", ""),
@@ -724,6 +888,242 @@ async def slate_index(request: Request):
     return templates.TemplateResponse("slate.html", {"request": request})
 
 
+@app.get("/video", response_class=HTMLResponse)
+async def video_index(request: Request):
+    return templates.TemplateResponse("video.html", {"request": request})
+
+
+@app.get("/i2v", response_class=HTMLResponse)
+async def i2v_index(request: Request):
+    return templates.TemplateResponse("i2v.html", {"request": request})
+
+
+@app.get("/portrait", response_class=HTMLResponse)
+async def portrait_index(request: Request):
+    return templates.TemplateResponse("portrait.html", {"request": request})
+
+
+@app.get("/api/i2v/capabilities")
+async def api_i2v_capabilities():
+    from app.i2v_service import capabilities
+
+    return await capabilities()
+
+
+@app.post("/api/i2v/generate")
+async def api_i2v_generate(
+    image: UploadFile = File(...),
+    prompt: str = Form(...),
+    duration_seconds: int = Form(60),
+):
+    from app.i2v_service import job_to_dict, start_job
+
+    if not prompt.strip():
+        raise HTTPException(status_code=400, detail="請輸入描述")
+    content = await image.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="請上傳圖片")
+    if len(content) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="圖片請小於 15MB")
+
+    job = await start_job(
+        prompt=prompt.strip(),
+        duration_seconds=duration_seconds,
+        image_bytes=content,
+        filename=image.filename or "upload.png",
+    )
+    return job_to_dict(job)
+
+
+@app.get("/api/i2v/status/{job_id}")
+async def api_i2v_status(job_id: str):
+    from app.i2v_service import get_job, job_to_dict
+
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="找不到任務")
+    return job_to_dict(job)
+
+
+@app.get("/api/i2v/download/{job_id}")
+async def api_i2v_download(job_id: str):
+    from app.i2v.config import JOBS_DIR
+    from app.i2v_service import get_job
+
+    job = get_job(job_id)
+    path: Path | None = None
+    if job and job.status == "done" and job.output_file:
+        path = Path(job.output_file)
+    if path is None or not path.exists():
+        fallback = JOBS_DIR / job_id / "output.mp4"
+        if fallback.is_file():
+            path = fallback
+        else:
+            raise HTTPException(status_code=404, detail="影片尚未準備好")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=f"anime_i2v_{job_id}.mp4",
+    )
+
+
+class PortraitGenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=500)
+    seed: int | None = None
+    batchCount: int | None = Field(default=None, ge=1, le=4)
+
+
+@app.get("/api/portrait/capabilities")
+async def api_portrait_capabilities():
+    from app.portrait_service import capabilities
+
+    return await capabilities()
+
+
+@app.post("/api/portrait/train")
+async def api_portrait_train(
+    photos: list[UploadFile] = File(...),
+    trigger_word: str = Form("ohwx"),
+    gender: str = Form("man"),
+):
+    from app.portrait_service import start_train
+
+    if not photos:
+        raise HTTPException(status_code=400, detail="請上傳照片")
+    files: list[tuple[bytes, str]] = []
+    for photo in photos:
+        content = await photo.read()
+        if not content:
+            continue
+        if len(content) > 15 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="單張照片請小於 15MB")
+        files.append((content, photo.filename or "photo.jpg"))
+    try:
+        return await start_train(
+            files=files,
+            trigger_word=trigger_word.strip(),
+            gender=gender.strip(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/portrait/train/status")
+async def api_portrait_train_status():
+    from app.portrait_service import train_status
+
+    return train_status()
+
+
+@app.post("/api/portrait/generate")
+async def api_portrait_generate(body: PortraitGenerateRequest):
+    from app.portrait_service import job_to_dict, start_generate
+
+    try:
+        job = await start_generate(
+            body.prompt.strip(),
+            seed=body.seed,
+            batch_count=body.batchCount,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return job_to_dict(job)
+
+
+@app.get("/api/portrait/status/{job_id}")
+async def api_portrait_status(job_id: str):
+    from app.portrait_service import get_job, job_to_dict
+
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="找不到任務")
+    return job_to_dict(job)
+
+
+@app.get("/api/portrait/download/{job_id}")
+async def api_portrait_download(job_id: str, variant: int | None = None):
+    from app.portrait_service import get_job
+
+    job = get_job(job_id)
+    if not job or job.status != "done" or not job.output_file:
+        raise HTTPException(status_code=404, detail="圖片尚未準備好")
+    if variant is not None and 1 <= variant <= len(job.variants):
+        path = Path(job.variants[variant - 1])
+    else:
+        path = Path(job.output_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        filename=f"portrait_{job_id}.png",
+    )
+
+
+@app.get("/api/portrait/history/{item_id}")
+async def api_portrait_history_item(item_id: str):
+    path = BASE_DIR / "data" / "portrait" / "jobs" / "history" / f"{item_id}.png"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="找不到歷史圖片")
+    return FileResponse(path, media_type="image/png")
+
+
+class VideoGenerateRequest(BaseModel):
+    topic: str = Field(min_length=2, max_length=120)
+    durationMinutes: int = Field(default=3, ge=1, le=10)
+    style: str = "documentary"
+    voice: str = "tw_female"
+
+
+@app.get("/api/video/capabilities")
+async def api_video_capabilities():
+    from app.video_generator import ffmpeg_available
+
+    return {"ffmpeg": ffmpeg_available(), "maxMinutes": 10}
+
+
+@app.post("/api/video/generate")
+async def api_video_generate(body: VideoGenerateRequest):
+    from app.video_service import job_to_dict, start_job
+
+    job = await start_job(
+        topic=body.topic,
+        duration_minutes=body.durationMinutes,
+        style=body.style,
+        voice=body.voice,
+    )
+    return job_to_dict(job)
+
+
+@app.get("/api/video/status/{job_id}")
+async def api_video_status(job_id: str):
+    from app.video_service import get_job, job_to_dict
+
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="找不到任務")
+    return job_to_dict(job)
+
+
+@app.get("/api/video/download/{job_id}")
+async def api_video_download(job_id: str):
+    from app.video_service import get_job
+
+    job = get_job(job_id)
+    if not job or job.status != "done" or not job.output_file:
+        raise HTTPException(status_code=404, detail="影片尚未準備好")
+    path = Path(job.output_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=f"ai_video_{job_id}.mp4",
+    )
+
+
 @app.get("/api/slate")
 async def api_slate(league: str | None = None):
     from app.slate_service import fetch_all_slates, fetch_league_slate
@@ -784,7 +1184,15 @@ async def _serve_mlb_picked_matchup(
 
     panels_ok = bool(cached and _panels_usable((cached.get("data") or {}), games))
 
-    if is_cloud_lite() or (not force and panels_ok):
+    if force and is_cloud_lite():
+        entry = await _force_refresh_mlb_cloud_lite(
+            team_id, games, expected, refresh_header=refresh_mlb_header
+        )
+        if entry:
+            return await _wrap_mlb_matchup(team_id, entry, refreshing=False, games=games)
+        return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
+
+    if not force and (is_cloud_lite() or panels_ok):
         if not cached:
             _kick_matchup_refresh_if_needed(
                 team_id=team_id,
@@ -802,20 +1210,22 @@ async def _serve_mlb_picked_matchup(
             )
             return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
 
-        needs_full_rebuild = force and not is_cloud_lite()
+        content_stale = False
+        if not force and not is_cloud_lite():
+            from app.panel_freshness import mlb_matchup_content_stale
+
+            content_stale = await mlb_matchup_content_stale(
+                team_id, cached.get("data") or {}
+            )
+        needs_full_rebuild = (force and not is_cloud_lite()) or content_stale
         needs_refresh = (
             (force and not is_cloud_lite())
             or not expected.matches_cache_entry(cached)
             or is_stale(cached["updatedAt"])
             or _needs_full_matchup_rebuild(cached, league="mlb", games=games)
+            or content_stale
         )
-        panels_stale = False
-        if not force:
-            from app.panel_freshness import panels_stale_for_league
-
-            panels_stale = await panels_stale_for_league(
-                "mlb", team_id, cached.get("data") or {}
-            )
+        panels_stale = content_stale
         expected_mismatch = _expected_cache_mismatch(expected, cached)
         refreshing = await _await_matchup_refresh_if_forced(
             team_id=team_id,
@@ -837,6 +1247,13 @@ async def _serve_mlb_picked_matchup(
             cached = get_matchup(team_id, games)
 
         if cached and expected and not expected.matches_cache_entry(cached):
+            if is_cloud_lite():
+                await refresh_mlb_header(team_id, games, expected=expected)
+                cached = get_matchup(team_id, games)
+            if cached and expected.matches_cache_entry(cached):
+                return await _wrap_mlb_matchup(
+                    team_id, cached, refreshing=False, games=games
+                )
             payload = await _wrap_mlb_matchup(
                 team_id, cached, refreshing=True, games=games
             )
@@ -859,6 +1276,10 @@ async def _serve_mlb_picked_matchup(
         game_pk=expected.game_pk,
     )
     await store_mlb_matchup(team_id, games, data)
+    if a_table := data.get("aTable"):
+        await store_mlb_a_table(team_id, a_table)
+    else:
+        await refresh_mlb_a_table(team_id)
     entry = get_matchup(team_id, games)
     if not entry:
         return loading_matchup_payload(team_id, cache_version=MLB_CACHE_VERSION)
@@ -921,8 +1342,17 @@ async def api_npb_matchup(
         needs_pitcher_patch = bool(
             cached and probable_pitchers_missing(cached.get("data") or {})
         )
-        needs_full_rebuild = force or _needs_full_matchup_rebuild(
-            cached, league="npb", games=games
+        panels_stale = False
+        if cached and not force:
+            from app.panel_freshness import panels_stale_for_league
+
+            panels_stale = await panels_stale_for_league(
+                "npb", team_id, cached.get("data") or {}
+            )
+        needs_full_rebuild = (
+            force
+            or _needs_full_matchup_rebuild(cached, league="npb", games=games)
+            or (panels_stale and not is_cloud_lite())
         )
         needs_refresh = (
             needs_full_rebuild
@@ -930,17 +1360,11 @@ async def api_npb_matchup(
             or npb_is_stale(cached["updatedAt"])
             or (expected is not None and not expected.matches_cache_entry(cached))
             or needs_pitcher_patch
+            or panels_stale
         )
         if cached and not force:
             cached = await ensure_npb_pitchers_fresh(
                 team_id, games, cached, expected=expected
-            )
-        panels_stale = False
-        if cached and not force:
-            from app.panel_freshness import panels_stale_for_league
-
-            panels_stale = await panels_stale_for_league(
-                "npb", team_id, cached.get("data") or {}
             )
         expected_mismatch = _expected_cache_mismatch(expected, cached)
         refreshing = await _await_matchup_refresh_if_forced(
@@ -1013,15 +1437,6 @@ async def api_cpbl_matchup(
             expected_home=expected_home,
         )
         cached = get_cpbl_matchup(team_id, games)
-        needs_full_rebuild = force or _needs_full_matchup_rebuild(
-            cached, league="cpbl", games=games
-        )
-        needs_refresh = (
-            needs_full_rebuild
-            or cached is None
-            or cpbl_is_stale(cached["updatedAt"])
-            or (expected is not None and not expected.matches_cache_entry(cached))
-        )
         panels_stale = False
         if cached and not force:
             from app.panel_freshness import panels_stale_for_league
@@ -1029,6 +1444,18 @@ async def api_cpbl_matchup(
             panels_stale = await panels_stale_for_league(
                 "cpbl", team_id, cached.get("data") or {}
             )
+        needs_full_rebuild = (
+            force
+            or _needs_full_matchup_rebuild(cached, league="cpbl", games=games)
+            or (panels_stale and not is_cloud_lite())
+        )
+        needs_refresh = (
+            needs_full_rebuild
+            or cached is None
+            or cpbl_is_stale(cached["updatedAt"])
+            or (expected is not None and not expected.matches_cache_entry(cached))
+            or panels_stale
+        )
         expected_mismatch = _expected_cache_mismatch(expected, cached)
         refreshing = await _await_matchup_refresh_if_forced(
             team_id=team_id,

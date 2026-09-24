@@ -14,7 +14,7 @@ from app.npb_display import localize_matchup_payload
 
 CACHE_TTL = timedelta(hours=1)
 DEFAULT_GAMES = 10
-CACHE_VERSION = 22
+CACHE_VERSION = 23
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CACHE_FILE = BASE_DIR / "data" / "npb_cache.json"
@@ -42,13 +42,21 @@ def get_matchup(team_id: int, games: int) -> dict[str, Any] | None:
     return _store.get(_matchup_key(team_id, games))
 
 
-def cache_needs_upgrade(entry: dict[str, Any]) -> bool:
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+def cache_needs_upgrade(entry: dict[str, Any], games: int = DEFAULT_GAMES) -> bool:
+    from app.pitcher_rows import (
+        pitcher_analysis_missing_pitch_counts,
+        pitcher_analysis_needs_rebuild,
+        pitcher_starter_mismatch,
+    )
 
     data = entry.get("data") or {}
     if int(data.get("cacheVersion") or 0) < CACHE_VERSION:
         return True
-    return pitcher_analysis_missing_pitch_counts(data)
+    if pitcher_analysis_missing_pitch_counts(data):
+        return True
+    if pitcher_starter_mismatch(data):
+        return True
+    return pitcher_analysis_needs_rebuild(data, game_count=games)
 
 
 def get_a_table(team_id: int) -> dict[str, Any] | None:

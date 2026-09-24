@@ -237,6 +237,38 @@ window.SiteConfig = (function () {
       out.liveHeaderLeague = league || "";
       return out;
     },
+    /** Force refresh: prefer live pitchers/lineups; keep static panels only when thicker. */
+    mergeForceRefresh(staticData, liveData, league) {
+      if (!liveData) return staticData || null;
+      if (!staticData) return liveData;
+      const out = JSON.parse(JSON.stringify(liveData));
+      const mergeHeader = this.mergeLiveMatchupHeader(staticData, liveData, league);
+      out.matchup = mergeHeader.matchup;
+      out.startingLineups = mergeHeader.startingLineups;
+      for (const side of ["away", "home"]) {
+        const sp = staticData[side] || {};
+        const lp = liveData[side] || {};
+        const panel = { ...(out[side] || {}) };
+        if (lp.probablePitcher) panel.probablePitcher = lp.probablePitcher;
+        if ((lp.pitcherAnalysis?.games?.length ?? 0) > 0) {
+          panel.pitcherAnalysis = lp.pitcherAnalysis;
+        } else if ((sp.pitcherAnalysis?.games?.length ?? 0) > 0) {
+          panel.pitcherAnalysis = sp.pitcherAnalysis;
+        }
+        const sg = sp.games?.length ?? 0;
+        const lg = lp.games?.length ?? 0;
+        if (sg > lg) {
+          panel.games = sp.games;
+          if (sp.summary) panel.summary = sp.summary;
+        }
+        out[side] = panel;
+      }
+      if (!out.aTable && staticData.aTable) out.aTable = staticData.aTable;
+      if (!out.situational && liveData.situational) out.situational = liveData.situational;
+      out.forceRefreshMerged = true;
+      out.liveHeaderLeague = league || "";
+      return out;
+    },
   };
 })();
 
@@ -410,7 +442,12 @@ window.ApiUtils = (function () {
       primary = await load(teamId, force, null);
     }
     if (primary.data?.pickStale && activePick && league && !force) {
-      primary = await load(teamId, true, activePick);
+      if (isMatchupDataReady(primary.data)) {
+        matchupPick.clear(league);
+        primary = await load(teamId, false, null);
+      } else {
+        primary = await load(teamId, true, activePick);
+      }
     }
     if (!activePick || matchupMatchesPick(primary.data, activePick)) return primary;
     const other =
@@ -436,8 +473,9 @@ window.ApiUtils = (function () {
     fetchFn,
     fetchJsonOpts = {},
     onLiveStart,
+    force = false,
   }) {
-    const result = await fetchMatchupForPick({
+    const staticResult = await fetchMatchupForPick({
       buildUrl: staticBuildUrl,
       teamId,
       games,
@@ -447,17 +485,18 @@ window.ApiUtils = (function () {
       fetchFn,
       fetchJsonOpts,
     });
-    if (
-      !SiteConfig.isStatic ||
-      !result.resp.ok ||
-      !result.data ||
-      !SiteConfig.matchupNeedsLiveRefresh(league, result.data, pick)
-    ) {
-      return result;
+    const needsLive =
+      force ||
+      (SiteConfig.isStatic &&
+        staticResult.resp.ok &&
+        staticResult.data &&
+        SiteConfig.matchupNeedsLiveRefresh(league, staticResult.data, pick));
+    if (!SiteConfig.isStatic || !needsLive) {
+      return staticResult;
     }
     if (onLiveStart) onLiveStart();
     const live = await fetchMatchupForPick({
-      buildUrl: (tid, g, _f, p) => SiteConfig.liveMatchupUrl(league, tid, g, true, p),
+      buildUrl: (tid, g, f, p) => SiteConfig.liveMatchupUrl(league, tid, g, f, p),
       teamId,
       games,
       force: true,
@@ -466,10 +505,61 @@ window.ApiUtils = (function () {
       fetchFn,
       fetchJsonOpts,
     });
-    if (live.resp.ok && live.data) {
-      result.data = SiteConfig.mergeLiveMatchupHeader(result.data, live.data, league);
+    if (!live.resp.ok || !live.data) {
+      return staticResult;
     }
-    return result;
+    if (force) {
+      live.data = SiteConfig.mergeForceRefresh(staticResult.data, live.data, league);
+    } else {
+      live.data = SiteConfig.mergeLiveMatchupHeader(staticResult.data, live.data, league);
+    }
+    return live;
+  }
+
+  function taiwanTodayYmd() {
+    return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
+  }
+
+  function taiwanTomorrowYmd() {
+    const t = new Date();
+    t.setTime(t.getTime() + 86_400_000);
+    return t.toLocaleDateString("en-CA", { timeZone: "Asia/Taipei" });
+  }
+
+  function pagesSlateLooksStale(data) {
+    if (!data) return true;
+    const today = taiwanTodayYmd();
+    const tomorrow = taiwanTomorrowYmd();
+    return String(data.today || "").slice(0, 10) !== today
+      || String(data.tomorrow || "").slice(0, 10) !== tomorrow;
+  }
+
+  /** Static site: use Pages slate when fresh; otherwise pull live from Render. */
+  async function fetchSlateWithLiveFallback(league, fetchFn, fetchJsonOpts = {}) {
+    const staticUrl =
+      typeof SiteConfig.slate === "function"
+        ? SiteConfig.slate(league)
+        : `/api/slate?league=${encodeURIComponent(league)}`;
+    const primary = await fetchJson(staticUrl, fetchFn, fetchJsonOpts);
+    if (
+      !SiteConfig.isStatic
+      || !primary.resp.ok
+      || !pagesSlateLooksStale(primary.data)
+    ) {
+      return primary;
+    }
+    const liveUrl = `${SiteConfig.liveApiRoot}/api/slate?league=${encodeURIComponent(league)}`;
+    try {
+      const live = await fetchJson(liveUrl, fetchFn, {
+        ...fetchJsonOpts,
+        retries: 4,
+        retryMs: 3000,
+      });
+      if (live.resp.ok && live.data) return live;
+    } catch (_) {
+      /* keep stale Pages slate as last resort */
+    }
+    return primary;
   }
 
   return {
@@ -484,6 +574,8 @@ window.ApiUtils = (function () {
     matchupMatchesPick,
     fetchMatchupForPick,
     fetchStaticMatchupWithLiveHeader,
+    fetchSlateWithLiveFallback,
+    pagesSlateLooksStale,
   };
 })();
 

@@ -143,10 +143,6 @@ window.GamePicker = (function () {
 
     el.innerHTML = '<p class="game-picker-loading">載入賽程…</p>';
 
-    const url =
-      typeof SiteConfig.slate === "function"
-        ? SiteConfig.slate(league)
-        : `/api/slate?league=${encodeURIComponent(league)}`;
     try {
       const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
       const timer = controller ? setTimeout(() => controller.abort(), 25000) : null;
@@ -154,7 +150,17 @@ window.GamePicker = (function () {
         fetch(u, controller ? { signal: controller.signal } : undefined).finally(() => {
           if (timer) clearTimeout(timer);
         });
-      const { resp, data } = await ApiUtils.fetchJson(url, fetchFn, {
+      const fetchSlate =
+        ApiUtils.fetchSlateWithLiveFallback ||
+        ((lg, fn, opts) =>
+          ApiUtils.fetchJson(
+            typeof SiteConfig.slate === "function"
+              ? SiteConfig.slate(lg)
+              : `/api/slate?league=${encodeURIComponent(lg)}`,
+            fn,
+            opts
+          ));
+      const { resp, data } = await fetchSlate(league, fetchFn, {
         retries: SiteConfig.isStatic ? 1 : 3,
         retryMs: SiteConfig.isStatic ? 500 : 2000,
       });

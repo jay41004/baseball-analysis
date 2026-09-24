@@ -296,14 +296,48 @@ async def fetch_mlb_slate() -> dict[str, list[dict[str, Any]]]:
     return _bucket_games(rows, today, tomorrow)
 
 
+def _mlb_slate_row_in_window(row: dict[str, Any], today: str, tomorrow: str) -> bool:
+    """Drop rows whose US officialDate is outside today's/tomorrow's Taiwan columns."""
+    gd = str(row.get("date") or row.get("officialDate") or "")[:10]
+    if not gd:
+        return False
+    us_today = _ymd_minus(today, 1)
+    us_tomorrow = _ymd_minus(tomorrow, 1)
+    return gd in {us_today, us_tomorrow}
+
+
 async def resolve_mlb_slate_pick(team_id: int) -> dict[str, Any] | None:
     """Today's slate first, then tomorrow — US officialDate row for this team."""
+    today, tomorrow = _today_tomorrow()
     bucket = await fetch_mlb_slate()
     for key in ("today", "tomorrow"):
         for game in bucket.get(key) or []:
+            if not _mlb_slate_row_in_window(game, today, tomorrow):
+                continue
             if team_id in {int(game["awayTeamId"]), int(game["homeTeamId"])}:
                 return game
     return None
+
+
+async def expected_from_next_mlb_game(team_id: int) -> "ExpectedMatchup | None":
+    """When today/tomorrow slate has no row, anchor on MLB's next scheduled game."""
+    from app.matchup_pick import ExpectedMatchup
+    from app.mlb_service import fetch_next_matchup
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            matchup = await fetch_next_matchup(client, team_id)
+    except Exception:
+        return None
+    if not matchup:
+        return None
+    official = str(matchup.get("officialDate") or matchup.get("date") or "")[:10]
+    return ExpectedMatchup(
+        date=official or None,
+        away_id=int(matchup["away"]["teamId"]),
+        home_id=int(matchup["home"]["teamId"]),
+        game_pk=int(matchup["gamePk"]) if matchup.get("gamePk") else None,
+    )
 
 
 def expected_from_slate_row(row: dict[str, Any]) -> "ExpectedMatchup":
@@ -324,16 +358,40 @@ def _slate_row_includes_team(row: dict[str, Any], team_id: int) -> bool:
     }
 
 
+def _mlb_pick_window_stale(expected: "ExpectedMatchup") -> bool:
+    """True when a saved pick is older than the current today/tomorrow slate window."""
+    if not expected.date:
+        return False
+    today, tomorrow = _today_tomorrow()
+    us_start = _ymd_minus(today, 1)
+    us_end = _ymd_minus(tomorrow, 1)
+    pd = str(expected.date)[:10]
+    return pd < us_start or pd > us_end
+
+
 async def align_expected_with_slate(
     team_id: int, expected: "ExpectedMatchup | None"
 ) -> "ExpectedMatchup | None":
     """Match by gamePk or team pair on today's/tomorrow slate (US officialDate)."""
     from app.matchup_pick import ExpectedMatchup
 
+    if expected and _mlb_pick_window_stale(expected):
+        expected = None
+
+    today, tomorrow = _today_tomorrow()
     bucket = await fetch_mlb_slate()
-    rows = (bucket.get("today") or []) + (bucket.get("tomorrow") or [])
+    rows = [
+        row
+        for row in (bucket.get("today") or []) + (bucket.get("tomorrow") or [])
+        if _mlb_slate_row_in_window(row, today, tomorrow)
+    ]
     if not rows:
-        return expected
+        row = await resolve_mlb_slate_pick(team_id)
+        if row:
+            return expected_from_slate_row(row)
+        if expected and expected.includes_team(team_id):
+            return expected
+        return await expected_from_next_mlb_game(team_id)
 
     if expected and expected.game_pk and expected.includes_team(team_id):
         for row in rows:
@@ -356,7 +414,11 @@ async def align_expected_with_slate(
                 return expected_from_slate_row(row)
 
     row = await resolve_mlb_slate_pick(team_id)
-    return expected_from_slate_row(row) if row else expected
+    if row:
+        return expected_from_slate_row(row)
+    if expected and expected.includes_team(team_id):
+        return expected
+    return await expected_from_next_mlb_game(team_id)
 
 
 _SLATE_FETCHERS = {

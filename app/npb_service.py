@@ -812,6 +812,22 @@ async def analyze_team_scoring(
     }
 
 
+def _starter_from_box_pitching(html: str, *, is_home: bool) -> str | None:
+    """First listed pitcher in npb.jp box score (top=away, bottom=home)."""
+    soup = BeautifulSoup(html, "html.parser")
+    div_id = "table_bottom_p" if is_home else "table_top_p"
+    tbody = soup.select_one(f"div#{div_id} table tbody")
+    if not tbody:
+        return None
+    first_row = tbody.find("tr")
+    if not first_row:
+        return None
+    cell = first_row.select_one("td.player a") or first_row.select_one("td.player")
+    if not cell:
+        return None
+    return cell.get_text(strip=True) or None
+
+
 def _parse_pitcher_pitch_count_from_box(
     html: str, pitcher_name: str, *, is_home: bool
 ) -> int | None:
@@ -882,6 +898,27 @@ def _build_pitcher_start_row(
     }
 
 
+def count_pitcher_final_starts_on_schedule(
+    schedule: list[dict[str, Any]], team_id: int, pitcher_name: str
+) -> int:
+    """Lightweight count of Final rows on schedule tagged with this starter (for completeness checks)."""
+    if not pitcher_name:
+        return 0
+    total = 0
+    for game in schedule:
+        if game.get("status") != "Final":
+            continue
+        away_id = int(game.get("awayTeamId") or 0)
+        home_id = int(game.get("homeTeamId") or 0)
+        if team_id not in {away_id, home_id}:
+            continue
+        is_home = home_id == team_id
+        label = game.get("homeProbablePitcher" if is_home else "awayProbablePitcher")
+        if label and _pitcher_name_matches(pitcher_name, str(label)):
+            total += 1
+    return total
+
+
 async def analyze_pitcher_starts(
     client: NpbClient,
     pitcher_name: str,
@@ -919,16 +956,21 @@ async def analyze_pitcher_starts(
             pbp_starter = _starter_from_playbyplay(pbp_html, is_home) if pbp_html else None
             if pbp_starter and _pitcher_name_matches(pitcher_name, pbp_starter):
                 matched = True
-            else:
-                probable = meta.get("homeProbablePitcher" if is_home else "awayProbablePitcher")
-                if not probable or not _pitcher_name_matches(pitcher_name, probable):
-                    return None
+        if not matched:
+            box_html = await client.fetch_boxscore(meta["href"])
+            box_starter = _starter_from_box_pitching(box_html, is_home=is_home) if box_html else None
+            if box_starter and _pitcher_name_matches(pitcher_name, box_starter):
+                matched = True
+        if not matched:
+            probable = meta.get("homeProbablePitcher" if is_home else "awayProbablePitcher")
+            if probable and _pitcher_name_matches(pitcher_name, str(probable)):
                 matched = True
         if not matched:
             return None
         if pbp_html is None:
             pbp_html = await client.fetch_playbyplay(meta["href"])
-        box_html = await client.fetch_boxscore(meta["href"])
+        if box_html is None:
+            box_html = await client.fetch_boxscore(meta["href"])
         opp_innings = parsed["awayInnings" if is_home else "homeInnings"]
         pbp_runs = None
         innings_pitched = None
@@ -954,7 +996,7 @@ async def analyze_pitcher_starts(
     rows: list[dict[str, Any]] = []
     batch_size = 15
     for index in range(0, len(candidates), batch_size):
-        if len(rows) >= scan_limit:
+        if len(rows) >= game_count:
             break
         batch = candidates[index : index + batch_size]
         results = await asyncio.gather(*[try_game(meta) for meta in batch])
@@ -969,6 +1011,7 @@ async def analyze_pitcher_starts(
         "pitcherName": pitcher_name,
         "games": display_rows,
         "_startPool": rows,
+        "startPoolSize": len(rows),
         "summary": summarize_pitcher_summary(display_rows, runs_list),
     }
 

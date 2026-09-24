@@ -86,21 +86,13 @@ async def refresh_matchup_header(
 
     from app.cloud_lite import is_cloud_lite
 
-    if is_cloud_lite():
-        from app.pages_mirror import seed_matchup_from_pages
-
-        await seed_matchup_from_pages(
-            "mlb", team_id, games, store=store_matchup, cache_version=CACHE_VERSION
-        )
-        return
-
     from app.mlb_service import (
         apply_mlb_playsport_probable_pitchers,
         fetch_matchup_starting_lineups,
         fetch_next_matchup,
         rebuild_pitcher_dependent_fields,
     )
-    from app.pages_mirror import seed_matchup_from_pages
+    from app.pages_mirror import matchup_payload_stale, seed_matchup_from_pages
     from app.pitcher_peer_sync import (
         merge_probable_pitchers_from_cache,
         patch_probable_pitcher_header,
@@ -115,6 +107,13 @@ async def refresh_matchup_header(
         cached = get_matchup(team_id, games)
     if not cached:
         return
+
+    if is_cloud_lite():
+        data = cached.get("data") or {}
+        fresh = not matchup_payload_stale(data, league="mlb")
+        aligned = expected is None or expected.matches_cache_entry(cached)
+        if fresh and aligned:
+            return
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         matchup = await fetch_next_matchup(client, team_id, expected=expected)
@@ -167,7 +166,7 @@ async def refresh_matchup_header(
             )
             data[side] = panel
     else:
-        # Opponents changed — keep correct header; drop stale panels.
+        # Opponents changed — update header; on cloud-lite keep team panels by ID.
         empty_summary = {
             "totalGames": 0,
             "over15": 0,
@@ -178,20 +177,43 @@ async def refresh_matchup_header(
             "avgFirstFive": 0,
             "firstInningScored": 0,
         }
+        old_panels = {
+            int((data.get(side) or {}).get("teamId") or 0): data.get(side)
+            for side in ("away", "home")
+        }
         for side in ("away", "home"):
             src = matchup[side]
-            data[side] = {
-                "teamId": src["teamId"],
-                "teamName": src["teamName"],
-                "probablePitcher": src.get("probablePitcher"),
-                "games": [],
-                "summary": dict(empty_summary),
+            tid = int(src["teamId"])
+            if is_cloud_lite() and old_panels.get(tid):
+                panel = copy.deepcopy(old_panels[tid])
+                panel["teamId"] = tid
+                panel["teamName"] = src["teamName"]
+                patch_probable_pitcher_header(
+                    panel,
+                    src.get("probablePitcher"),
+                    game_changed=True,
+                    force_refresh=True,
+                )
+                data[side] = panel
+            else:
+                data[side] = {
+                    "teamId": tid,
+                    "teamName": src["teamName"],
+                    "probablePitcher": src.get("probablePitcher"),
+                    "games": [],
+                    "summary": dict(empty_summary),
+                }
+        if not is_cloud_lite():
+            data["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
+            data.pop("aTable", None)
+            data.pop("situational", None)
+        else:
+            data["startingLineups"] = data.get("startingLineups") or {
+                "away": {"batters": []},
+                "home": {"batters": []},
             }
-        data["startingLineups"] = {"away": {"batters": []}, "home": {"batters": []}}
-        data.pop("aTable", None)
-        data.pop("situational", None)
 
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts, pitcher_starter_mismatch
 
     if not game_changed:
         merge_probable_pitchers_from_cache(
@@ -201,23 +223,30 @@ async def refresh_matchup_header(
 
     restore_pitcher_analysis_after_header_patch(data, prev_snapshot)
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
-        _name(data.get(side))
-        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
-        for side in ("away", "home")
+    needs_analysis = (
+        pitcher_analysis_missing_pitch_counts(data)
+        or pitcher_starter_mismatch(data)
+        or any(
+            _name(data.get(side))
+            and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
+            for side in ("away", "home")
+        )
     )
-
-    if needs_analysis and has_starter:
-        try:
-            data = await rebuild_pitcher_dependent_fields(data, game_count=games)
-        except Exception:
-            logger.exception(
-                "MLB pitcher rebuild failed for team %s (header kept)", team_id
-            )
 
     status = (matchup.get("status") or "").strip().lower()
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
+            if not needs_analysis and has_starter and not is_cloud_lite():
+                from app.panel_freshness import mlb_pitcher_analysis_stale
+
+                needs_analysis = await mlb_pitcher_analysis_stale(client, data)
+            if needs_analysis and has_starter and not is_cloud_lite():
+                try:
+                    data = await rebuild_pitcher_dependent_fields(data, game_count=games)
+                except Exception:
+                    logger.exception(
+                        "MLB pitcher rebuild failed for team %s (header kept)", team_id
+                    )
             data["startingLineups"] = await fetch_matchup_starting_lineups(
                 client, matchup
             )
@@ -318,7 +347,13 @@ async def _teams_needing_refresh_async(
             if not entry:
                 continue
             try:
-                if await mlb_team_panels_stale(client, tid, entry.get("data") or {}):
+                data = entry.get("data") or {}
+                if await mlb_team_panels_stale(client, tid, data):
+                    stale.append(team)
+                    continue
+                from app.panel_freshness import mlb_pitcher_analysis_stale
+
+                if await mlb_pitcher_analysis_stale(client, data):
                     stale.append(team)
             except Exception:
                 logger.exception("MLB panel stale check failed for team %s", tid)
@@ -397,10 +432,10 @@ async def mlb_live_header_sync_loop() -> None:
                         ):
                             await refresh_matchup_header(team_id, DEFAULT_GAMES)
                             continue
-                        from app.panel_freshness import mlb_team_panels_stale
+                        from app.panel_freshness import mlb_matchup_content_stale
 
-                        if await mlb_team_panels_stale(
-                            client, team_id, entry.get("data") or {}
+                        if await mlb_matchup_content_stale(
+                            team_id, entry.get("data") or {}
                         ):
                             await refresh_matchup(team_id, DEFAULT_GAMES)
                     except Exception:
@@ -432,6 +467,7 @@ async def start_cache_services(*, skip_load: bool = False) -> None:
     asyncio.create_task(hourly_refresh_loop())
     asyncio.create_task(mlb_live_header_sync_loop())
     asyncio.create_task(_startup_data_validation_loop())
+    asyncio.create_task(_periodic_data_validation_loop())
 
 
 async def _cloud_lite_pages_sync_loop() -> None:
@@ -447,6 +483,37 @@ async def _cloud_lite_pages_sync_loop() -> None:
         await asyncio.sleep(int(os.environ.get("CLOUD_LITE_SYNC_SECONDS", "1800")))
 
 
+async def _periodic_data_validation_loop() -> None:
+    """Re-validate and auto-repair caches on a schedule (local server)."""
+    interval = int(os.environ.get("VALIDATION_INTERVAL_SECONDS", "21600"))
+    if interval <= 0:
+        return
+    await asyncio.sleep(int(os.environ.get("VALIDATION_INTERVAL_DELAY", "900")))
+    while True:
+        try:
+            from app.data_validate import validate_all_caches
+
+            report = await validate_all_caches(
+                repair_cpbl=True,
+                repair_mlb=True,
+                repair_npb=True,
+                offline=False,
+            )
+            if not report.get("ok"):
+                critical = report.get("critical") or []
+                logger.error(
+                    "Periodic validation: %s issue(s) after auto-repair",
+                    len(critical),
+                )
+                for msg in critical[:10]:
+                    logger.error("  validate: %s", msg)
+            else:
+                logger.info("Periodic data validation: all caches OK")
+        except Exception:
+            logger.exception("Periodic data validation failed")
+        await asyncio.sleep(interval)
+
+
 async def _startup_data_validation_loop() -> None:
     """One-shot cross-league cache audit after boot; MLB auto-repairs in background."""
     delay = int(os.environ.get("VALIDATION_START_DELAY", "120"))
@@ -458,7 +525,7 @@ async def _startup_data_validation_loop() -> None:
         report = await validate_all_caches(
             repair_cpbl=True,
             repair_mlb=True,
-            repair_npb=False,
+            repair_npb=True,
             offline=False,
         )
         if report.get("ok"):

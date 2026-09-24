@@ -7,6 +7,9 @@ data/cache.json
 data/npb_cache.json
 probe_*
 verify_*
+tools/ffmpeg/
+data/i2v/jobs/
+data/i2v/.setup_done
 *.json
 !data/.gitkeep
 !data/cache.json

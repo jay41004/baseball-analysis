@@ -207,6 +207,9 @@ def strip_panel_internals(panel: dict[str, Any]) -> dict[str, Any]:
     analysis = cleaned.get("pitcherAnalysis")
     if isinstance(analysis, dict) and "_startPool" in analysis:
         pitcher_copy = dict(analysis)
+        pool = pitcher_copy.get("_startPool") or []
+        if pool:
+            pitcher_copy["startPoolSize"] = len(pool)
         pitcher_copy.pop("_startPool", None)
         cleaned["pitcherAnalysis"] = pitcher_copy
     return cleaned

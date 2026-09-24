@@ -1217,6 +1217,7 @@ async def analyze_pitcher_first_five_starts(
         "pitcherName": pitcher_name,
         "games": display_rows,
         "_startPool": rows,
+        "startPoolSize": len(rows),
         "summary": summarize_pitcher_summary(display_rows, runs_list),
     }
 

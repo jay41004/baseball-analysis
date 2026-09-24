@@ -95,6 +95,15 @@ def _npb_should_live_patch(
     return md == _npb_jst_today()
 
 
+def _npb_should_live_patch_on_read(
+    data: dict[str, Any], expected: ExpectedMatchup | None = None
+) -> bool:
+    """API read path: patch only when header/starters are wrong — not every game-day poll."""
+    if probable_pitchers_missing(data):
+        return True
+    return npb_header_stale(data, expected)
+
+
 def _apply_live_npb_header(
     data: dict[str, Any],
     matchup: dict[str, Any],
@@ -245,7 +254,7 @@ async def ensure_npb_pitchers_fresh(
 
     data = (cached.get("data") or {}) if cached else {}
     if is_cloud_lite():
-        if cached and _npb_should_live_patch(data, expected):
+        if cached and _npb_should_live_patch_on_read(data, expected):
             return await patch_npb_header_from_live(
                 team_id, games, cached, expected=expected
             )
@@ -254,7 +263,7 @@ async def ensure_npb_pitchers_fresh(
     import copy
 
     data = copy.deepcopy(data)
-    if _npb_should_live_patch(data, expected):
+    if _npb_should_live_patch_on_read(data, expected):
         return await patch_npb_header_from_live(
             team_id, games, cached, expected=expected
         )
@@ -282,13 +291,28 @@ async def ensure_npb_pitchers_fresh(
     if not changed:
         return cached
 
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+    from app.pitcher_rows import pitcher_analysis_needs_rebuild
 
     has_starter = any(_pitcher_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
-        _pitcher_name(data.get(side))
-        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
-        for side in ("away", "home")
+    expected_by_side: dict[str, int] = {}
+    if has_starter:
+        client = NpbClient()
+        try:
+            schedule = await client.fetch_schedule()
+            from app.npb_service import count_pitcher_final_starts_on_schedule
+
+            for side in ("away", "home"):
+                panel = data.get(side) or {}
+                name = _pitcher_name(panel)
+                tid = int(panel.get("teamId") or 0)
+                if name and tid:
+                    expected_by_side[side] = count_pitcher_final_starts_on_schedule(
+                        schedule, tid, name
+                    )
+        finally:
+            await client.close()
+    needs_analysis = pitcher_analysis_needs_rebuild(
+        data, game_count=games, expected_starts_by_side=expected_by_side
     )
     if has_starter and needs_analysis:
         try:
@@ -482,17 +506,32 @@ async def refresh_matchup_header(
         data.pop("aTable", None)
         data.pop("situational", None)
 
-    from app.pitcher_rows import pitcher_analysis_missing_pitch_counts
+    from app.pitcher_rows import pitcher_analysis_needs_rebuild
 
     if prev_snapshot:
         merge_probable_pitchers_from_cache(
             data, prev_snapshot, league="npb", fill_only=True
         )
     has_starter = any(_name(data.get(side)) for side in ("away", "home"))
-    needs_analysis = pitcher_analysis_missing_pitch_counts(data) or any(
-        _name(data.get(side))
-        and not ((data.get(side) or {}).get("pitcherAnalysis") or {}).get("games")
-        for side in ("away", "home")
+    expected_by_side: dict[str, int] = {}
+    if has_starter:
+        client = NpbClient()
+        try:
+            schedule = await client.fetch_schedule()
+            from app.npb_service import count_pitcher_final_starts_on_schedule
+
+            for side in ("away", "home"):
+                panel = data.get(side) or {}
+                starter = _name(panel)
+                tid = int(panel.get("teamId") or 0)
+                if starter and tid:
+                    expected_by_side[side] = count_pitcher_final_starts_on_schedule(
+                        schedule, tid, starter
+                    )
+        finally:
+            await client.close()
+    needs_analysis = pitcher_analysis_needs_rebuild(
+        data, game_count=games, expected_starts_by_side=expected_by_side
     )
     if needs_analysis and has_starter:
         try:
